@@ -93,10 +93,9 @@ function ensureAdminUser() {
     (u) => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()
   );
 
-  if (!existingAdmin) {
+  if (!existingAdmin && process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.length >= 16) {
     const salt = crypto.randomBytes(16).toString('hex');
-    const defaultPassword = process.env.ADMIN_PASSWORD || 'AdminAlgiers2026!';
-    const passwordHash = hashPassword(defaultPassword, salt);
+    const passwordHash = hashPassword(process.env.ADMIN_PASSWORD, salt);
 
     const adminUser: ServerUser = {
       id: 'admin-' + crypto.randomBytes(6).toString('hex'),
@@ -198,6 +197,56 @@ export function updateUser(id: string, updates: Partial<ServerUser>): ServerUser
 
   const updated: ServerUser = { ...user, ...updates };
   users.set(id, updated);
+  saveAuthData();
+  return updated;
+}
+
+export function createUser(email: string, password: string): ServerUser {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || cleanEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('INVALID_EMAIL');
+  }
+  if (cleanEmail === ADMIN_EMAIL.toLowerCase()) throw new Error('ADMIN_REGISTRATION_DISABLED');
+  if (password.length < 10 || password.length > 128) throw new Error('WEAK_PASSWORD');
+  if (getUserByEmail(cleanEmail)) throw new Error('ACCOUNT_EXISTS');
+
+  const salt = crypto.randomBytes(16).toString('hex');
+  const user: ServerUser = {
+    id: 'user-' + crypto.randomBytes(16).toString('hex'),
+    email: cleanEmail,
+    passwordHash: hashPassword(password, salt),
+    salt,
+    role: 'user',
+    plan: 'free',
+    trialGenerationsUsed: 0,
+    trialGenerationsLimit: 1,
+    monthlyGenerationsUsed: 0,
+    monthlyGenerationsLimit: 0,
+    createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+  };
+  users.set(user.id, user);
+  saveAuthData();
+  return user;
+}
+
+export function authenticateUser(email: string, password: string): ServerUser | null {
+  const user = getUserByEmail(email);
+  if (!user?.passwordHash || !user.salt) return null;
+  if (!verifyPassword(password, user.salt, user.passwordHash)) return null;
+  const updated = { ...user, lastLoginAt: new Date().toISOString() };
+  users.set(user.id, updated);
+  saveAuthData();
+  return updated;
+}
+
+export function setUserPassword(userId: string, password: string): ServerUser | null {
+  if (password.length < 16 || password.length > 128) return null;
+  const user = users.get(userId);
+  if (!user) return null;
+  const salt = crypto.randomBytes(16).toString('hex');
+  const updated = { ...user, salt, passwordHash: hashPassword(password, salt) };
+  users.set(userId, updated);
   saveAuthData();
   return updated;
 }
