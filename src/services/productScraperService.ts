@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import * as cheerio from 'cheerio';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { AlgiersPersonaId } from './algerianPersonaVoiceService';
 
 export interface ExtractedProductData {
@@ -28,6 +30,63 @@ export interface GenerateScriptFromUrlResponse {
   personaUsed: AlgiersPersonaId;
   campaignType: string;
   highlightedLoanwords: string[];
+}
+
+function isPrivateAddress(address: string): boolean {
+  const normalized = address.toLowerCase().split('%')[0];
+  if (isIP(normalized) === 4) {
+    const octets = normalized.split('.').map(Number);
+    const [a, b] = octets;
+    return a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 198 && (b === 18 || b === 19));
+  }
+  if (isIP(normalized) === 6) {
+    return normalized === '::' || normalized === '::1' ||
+      normalized.startsWith('fc') || normalized.startsWith('fd') ||
+      normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
+      normalized.startsWith('fea') || normalized.startsWith('feb') ||
+      normalized.startsWith('::ffff:127.') || normalized.startsWith('::ffff:10.') ||
+      normalized.startsWith('::ffff:192.168.');
+  }
+  return true;
+}
+
+async function assertPublicHttpUrl(value: string): Promise<URL> {
+  const url = new URL(value);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error('الرابط غير مسموح به. استعمل رابط HTTP أو HTTPS عام بدون بيانات دخول.');
+  }
+  if (url.port && !['80', '443'].includes(url.port)) {
+    throw new Error('المنفذ الموجود في الرابط غير مسموح به.');
+  }
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
+    throw new Error('لا يمكن جلب روابط الشبكة المحلية.');
+  }
+  if (isIP(hostname)) {
+    if (isPrivateAddress(hostname)) throw new Error('لا يمكن جلب عنوان شبكة خاص أو داخلي.');
+  } else {
+    const records = await lookup(hostname, { all: true, verbatim: true });
+    if (!records.length || records.some((record) => isPrivateAddress(record.address))) {
+      throw new Error('عنوان الموقع غير عام أو غير آمن للجلب.');
+    }
+  }
+  return url;
+}
+
+async function safeFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  let current = input;
+  for (let redirects = 0; redirects <= 3; redirects++) {
+    await assertPublicHttpUrl(current);
+    const response = await fetch(current, { ...init, redirect: 'manual' });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get('location');
+    if (!location) return response;
+    current = new URL(location, current).toString();
+  }
+  throw new Error('عدد التحويلات في رابط المنتج تجاوز الحد المسموح.');
 }
 
 const DEMO_STORE_PRESETS: Record<string, ExtractedProductData> = {
@@ -76,12 +135,9 @@ export async function scrapeProductUrl(productUrl: string): Promise<ExtractedPro
   // Validate URL
   let parsedUrl: URL;
   try {
-    parsedUrl = new URL(productUrl);
-    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-      throw new Error('Invalid URL protocol. Must be http or https.');
-    }
-  } catch {
-    throw new Error('الرابط المدخل غير صالح. يرجى إدخال رابط متجر صحيح يبدأ بـ https://');
+    parsedUrl = await assertPublicHttpUrl(productUrl);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'الرابط المدخل غير صالح أو غير آمن.');
   }
 
   // Fast-track demo sample store URLs without network latency
@@ -95,7 +151,7 @@ export async function scrapeProductUrl(productUrl: string): Promise<ExtractedPro
   if (parsedUrl.pathname.includes('/products/')) {
     try {
       const jsonUrl = `${parsedUrl.origin}${parsedUrl.pathname}.json`;
-      const jsonRes = await fetch(jsonUrl, {
+      const jsonRes = await safeFetch(jsonUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         signal: AbortSignal.timeout(3000),
       });
@@ -130,7 +186,7 @@ export async function scrapeProductUrl(productUrl: string): Promise<ExtractedPro
   // 2. Fetch raw HTML with resilient timeout and fallback
   let html = '';
   try {
-    const res = await fetch(productUrl, {
+    const res = await safeFetch(productUrl, {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
