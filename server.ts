@@ -21,7 +21,6 @@ import {
   setAuthCookie,
   clearAuthCookie,
   checkGenerationAllowance,
-  incrementGenerationUsage,
   verifyPassword,
   createUser,
   authenticateUser,
@@ -307,7 +306,7 @@ Generate:
 
 // Endpoint: Generate high-resolution email visuals with 1K, 2K, 4K affordance
 // Uses model gemini-3-pro-image-preview as required
-app.post('/api/generate-image', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-image', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, aspectRatio = '16:9', imageSize = '2K', style = 'Cinematic 3D Modern' } = req.body;
     if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) {
@@ -787,23 +786,11 @@ app.get('/api/admin/users', adminLimiter, requireAdmin, async (_req: Request, re
 });
 
 // Endpoint: Conflict-Free Algiers Persona & Emotion Voice Synthesis (Rate limited & usage controlled)
-app.post('/api/generate-persona-speech', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-persona-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, persona, emotionalCue, extraDirectives } = req.body;
     if (typeof scriptText !== 'string' || !scriptText.trim() || scriptText.length > 2500) {
       res.status(400).json({ error: 'INVALID_SCRIPT', message: 'النص مطلوب ويجب ألا يتجاوز 2500 حرف.' });
-      return;
-    }
-
-    // Server-side subscription and free-trial enforcement
-    const allowance = checkGenerationAllowance(req.user);
-    if (!allowance.allowed) {
-      res.status(403).json({
-        error: 'USAGE_LIMIT_EXCEEDED',
-        message: allowance.reason,
-        remaining: allowance.remaining,
-        plan: allowance.plan,
-      });
       return;
     }
 
@@ -813,10 +800,6 @@ app.post('/api/generate-persona-speech', genLimiter, requireAuth, async (req: Re
       emotionalCue,
       extraDirectives,
     });
-
-    if (result && result.success) {
-      await incrementGenerationUsage(req.user);
-    }
 
     res.json(result);
   } catch (err: unknown) {
@@ -829,7 +812,7 @@ app.post('/api/generate-persona-speech', genLimiter, requireAuth, async (req: Re
 });
 
 // Endpoint: Extract Product Data from URL & Generate Algiers E-Commerce Ad Script
-app.post('/api/generate-script-from-url', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-script-from-url', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { productUrl, campaignType = 'ecommerce_flash_sale', persona = 'zephyr_warm' } = req.body;
     if (typeof productUrl !== 'string' || !productUrl.trim() || productUrl.length > 2048) {
