@@ -122,14 +122,8 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
   onNavigateToPricing,
 }) => {
   // Plan & Trial State Management
-  const [userPlan, setUserPlan] = useState<UserPlanTier>(() => {
-    const saved = localStorage.getItem('dz_audio_user_plan');
-    return (saved as UserPlanTier) || 'free_trial';
-  });
-
-  const [freeTrialUsed, setFreeTrialUsed] = useState<boolean>(() => {
-    return localStorage.getItem('dz_audio_free_trial_used') === 'true';
-  });
+  const [userPlan, setUserPlan] = useState<UserPlanTier>('free_trial');
+  const [freeTrialUsed, setFreeTrialUsed] = useState<boolean>(false);
 
   const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
   const [copiedRipModal, setCopiedRipModal] = useState(false);
