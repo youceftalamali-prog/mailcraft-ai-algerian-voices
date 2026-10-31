@@ -256,77 +256,52 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
       });
   };
 
-  // Handle Google One-Tap / OAuth sign-in
-  const handleGoogleSignIn = async (customEmail?: string) => {
-    setIsSubmittingAuth(true);
-    const chosenEmail = customEmail || (authEmail ? authEmail.trim() : 'store.alger@gmail.com');
-    const isOwner = isAdminUser(chosenEmail);
-
-    try {
-      await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: chosenEmail }),
-      });
-    } catch (err) {
-      console.warn('Google server auth sync error:', err);
-    }
-
-    setIsSubmittingAuth(false);
-    setAuthSuccessMessage(
-      isOwner
-        ? `مرحباً بك يا يوسف! تم تسجيل دخول المالك (${ADMIN_EMAIL}) وتفعيل كامل صلاحيات لوحة الإدارة 👑`
-        : `تم تسجيل الدخول بنجاح بحساب Google (${chosenEmail})! تم تفعيل تجربتك المجانية الأولى.`
-    );
-    if (onLoginSuccess) {
-      onLoginSuccess(chosenEmail);
-    }
-    setTimeout(() => {
-      if (isOwner && onNavigateToAdmin) {
-        onNavigateToAdmin();
-      } else {
-        onEnterStudio();
-      }
-    }, 700);
+  // Google OAuth remains unavailable until a real Google ID-token client is configured.
+  const handleGoogleSignIn = async () => {
+    setAuthSuccessMessage('تسجيل Google غير مفعّل حالياً لأسباب أمنية. استعمل البريد الإلكتروني وكلمة المرور.');
   };
 
-  // Handle Traditional Email/Password Form Submit
+  // Email registration/login: only show success after the server confirms it.
   const handleEmailAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authEmail || !authPassword) return;
-
+    if (!authEmail.trim() || !authPassword) return;
     setIsSubmittingAuth(true);
-    const isOwner = isAdminUser(authEmail);
+    setAuthSuccessMessage(null);
 
     try {
+      const isOwner = isAdminUser(authEmail);
       const endpoint = isOwner ? '/api/auth/admin-login' : '/api/auth/login';
-      await fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: authEmail.trim(), password: authPassword }),
+        body: JSON.stringify({
+          email: authEmail.trim(),
+          password: authPassword,
+          ...(isOwner ? {} : { mode: authMode }),
+        }),
       });
-    } catch (err) {
-      console.warn('Email server auth error:', err);
-    }
-
-    setIsSubmittingAuth(false);
-    setAuthSuccessMessage(
-      isOwner
-        ? `مرحباً بك يا يوسف! تم تسجيل دخول مالك المنصة (${ADMIN_EMAIL}) وتفعيل كامل صلاحيات لوحة الإدارة 👑`
-        : authMode === 'signup'
-        ? 'تم إنشاء حسابك بنجاح! تم منحك تجربة إعلان مجانية كاملة (1 Free Trial) في الاستوديو.'
-        : 'أهلاً بعودتك! جاري الدخول إلى استوديو الإعلانات...'
-    );
-    if (onLoginSuccess) {
-      onLoginSuccess(authEmail.trim());
-    }
-    setTimeout(() => {
-      if (isOwner && onNavigateToAdmin) {
-        onNavigateToAdmin();
-      } else {
-        onEnterStudio();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success || !data.user) {
+        setAuthSuccessMessage(data.message || 'تعذر تسجيل الدخول. تحقق من البيانات وحاول مجدداً.');
+        setIsSubmittingAuth(false);
+        return;
       }
-    }, 800);
+
+      setAuthSuccessMessage(isOwner
+        ? 'تم التحقق من حساب المالك بنجاح.'
+        : authMode === 'signup'
+          ? 'تم إنشاء حسابك بنجاح! لديك تجربة إعلان مجانية واحدة.'
+          : 'أهلاً بعودتك! تم تسجيل الدخول بنجاح.');
+      onLoginSuccess?.(data.user.email);
+      setTimeout(() => {
+        if (isOwner && onNavigateToAdmin) onNavigateToAdmin();
+        else onEnterStudio();
+      }, 700);
+    } catch {
+      setAuthSuccessMessage('تعذر الاتصال بالخادم. لم يتم تسجيل الدخول.');
+    } finally {
+      setIsSubmittingAuth(false);
+    }
   };
 
   const handleCopyRip = () => {
