@@ -36,9 +36,9 @@ export function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase().split('%')[0];
   if (isIP(normalized) === 4) {
     const octets = normalized.split('.').map(Number);
-    const [a, b] = octets;
+    const [a, b, c] = octets;
     return a === 0 || a === 10 || a === 127 || a >= 224 ||
-      (a === 192 && (b === 0 || b === 2)) || (a === 198 && b === 51) || (a === 203 && b === 0) ||
+      (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113) ||
       (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) ||
       (a === 198 && (b === 18 || b === 19));
