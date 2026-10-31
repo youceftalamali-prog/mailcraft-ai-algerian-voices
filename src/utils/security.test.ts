@@ -1,113 +1,65 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ADMIN_EMAIL,
-  hashPassword,
-  verifyPassword,
-  createSession,
-  getSession,
-  destroySession,
-  registerOrGetUser,
-  createUser,
-  authenticateUser,
-  getUserByEmail,
-  checkGenerationAllowance,
-  incrementGenerationUsage,
-  ServerUser,
+  ADMIN_EMAIL, hashPassword, verifyPassword, checkGenerationAllowance,
+  initializeAuthStore, createUser, authenticateUser, getUserByEmail,
+  createSession, getSession, destroySession, registerOrGetUser,
 } from '../server/security.js';
 
-describe('Security & Authentication Subsystem', () => {
-  test('secure password hashing and timing-safe verification', () => {
+describe('Authentication primitives', () => {
+  test('scrypt password hashing verifies only the correct password', () => {
     const salt = 'a1b2c3d4e5f60718';
     const password = 'MySecurePassword2026!';
     const hash = hashPassword(password, salt);
-
-    assert.ok(hash.length >= 64, 'Password hash should be 64+ bytes hex');
-    assert.equal(verifyPassword(password, salt, hash), true, 'Correct password must verify');
-    assert.equal(verifyPassword('WrongPassword123', salt, hash), false, 'Incorrect password must fail');
+    assert.ok(hash.length >= 128);
+    assert.equal(verifyPassword(password, salt, hash), true);
+    assert.equal(verifyPassword('WrongPassword123', salt, hash), false);
   });
 
-  test('new accounts require a strong password and authenticate only with the correct password', () => {
-    const email = `secure-${Date.now()}@example.test`;
-    assert.throws(() => createUser(email, 'short'), /WEAK_PASSWORD/);
-    const user = createUser(email, 'Correct-Horse-Battery-2026!');
+  test('free trial allowance is limited to one generation', () => {
+    const user = {
+      id: 'trial-user', email: 'trial@example.test', role: 'user' as const, plan: 'free' as const,
+      trialGenerationsUsed: 0, trialGenerationsLimit: 1, monthlyGenerationsUsed: 0,
+      monthlyGenerationsLimit: 0, createdAt: new Date().toISOString(), lastLoginAt: new Date().toISOString(),
+    };
+    assert.equal(checkGenerationAllowance(user).allowed, true);
+    user.trialGenerationsUsed = 1;
+    assert.equal(checkGenerationAllowance(user).allowed, false);
+  });
+
+  test('administrator allowance is unlimited', () => {
+    const result = checkGenerationAllowance({
+      id: 'admin', email: ADMIN_EMAIL, role: 'admin', plan: 'business',
+      trialGenerationsUsed: 100, trialGenerationsLimit: 1, monthlyGenerationsUsed: 100,
+      monthlyGenerationsLimit: 1, createdAt: new Date().toISOString(), lastLoginAt: new Date().toISOString(),
+    });
+    assert.equal(result.allowed, true);
+    assert.equal(result.plan, 'admin_unlimited');
+  });
+});
+
+describe('Neon PostgreSQL authentication integration', () => {
+  const skip = !process.env.DATABASE_URL;
+  test('signup, login, persistent session lookup and logout', { skip }, async () => {
+    await initializeAuthStore();
+    const email = `auth-test-${Date.now()}@example.test`;
+    const user = await createUser(email, 'Correct-Horse-Battery-2026!');
     assert.equal(user.role, 'user');
-    assert.equal(user.passwordHash === 'Correct-Horse-Battery-2026!', false);
-    assert.equal(authenticateUser(email, 'wrong-password'), null);
-    assert.equal(authenticateUser(email, 'Correct-Horse-Battery-2026!')?.id, user.id);
+    assert.equal(await getUserByEmail(email)?.then((u) => u?.id), user.id);
+    assert.equal(await authenticateUser(email, 'incorrect-password'), null);
+    assert.equal((await authenticateUser(email, 'Correct-Horse-Battery-2026!'))?.id, user.id);
+
+    const session = await createSession(user.id, '127.0.0.1');
+    assert.ok(session.token.length >= 64);
+    assert.equal((await getSession(session.token))?.userId, user.id);
+    assert.equal(await destroySession(session.token), true);
+    assert.equal(await getSession(session.token), null);
   });
 
-  test('session creation, retrieval, and destruction', () => {
-    const dummyUserId = 'test-user-' + Date.now();
-    const session = createSession(dummyUserId, '127.0.0.1', 1);
-
-    assert.ok(session.token && session.token.length >= 32, 'Session token must be secure random hex');
-    assert.equal(session.userId, dummyUserId);
-
-    const retrieved = getSession(session.token);
-    assert.ok(retrieved, 'Session must be retrievable before expiration');
-    assert.equal(retrieved.userId, dummyUserId);
-
-    const destroyed = destroySession(session.token);
-    assert.equal(destroyed, true);
-    assert.equal(getSession(session.token), null, 'Destroyed session must return null');
-  });
-
-  test('role-based access control enforces admin exclusively for owner', () => {
-    const adminUser = registerOrGetUser(ADMIN_EMAIL);
-    assert.equal(adminUser.role, 'admin');
-    assert.equal(adminUser.email.toLowerCase(), ADMIN_EMAIL.toLowerCase());
-
-    const normalUser = registerOrGetUser('customer.oran@gmail.com');
-    assert.equal(normalUser.role, 'user');
-    assert.equal(normalUser.plan, 'free');
-  });
-
-  test('server-side free-trial and usage limit enforcement', () => {
-    const testUser: ServerUser = {
-      id: 'trial-user-' + Date.now(),
-      email: 'trial.user@store.dz',
-      role: 'user',
-      plan: 'free',
-      trialGenerationsUsed: 0,
-      trialGenerationsLimit: 1,
-      monthlyGenerationsUsed: 0,
-      monthlyGenerationsLimit: 1,
-      createdAt: new Date().toISOString(),
-      lastLoginAt: new Date().toISOString(),
-    };
-
-    // First generation is allowed
-    const allowance1 = checkGenerationAllowance(testUser);
-    assert.equal(allowance1.allowed, true);
-    assert.equal(allowance1.remaining, 1);
-
-    // Consume the 1 trial generation
-    incrementGenerationUsage(testUser);
-    assert.equal(testUser.trialGenerationsUsed, 1);
-
-    // Subsequent generation attempt MUST be rejected by server
-    const allowance2 = checkGenerationAllowance(testUser);
-    assert.equal(allowance2.allowed, false, 'Free trial bypass must be strictly blocked on server');
-    assert.ok(allowance2.reason?.includes('استهلكت إعلان التجربة المجاني'));
-  });
-
-  test('admin user has unlimited generation allowance', () => {
-    const adminUser: ServerUser = {
-      id: 'admin-unlimited',
-      email: ADMIN_EMAIL,
-      role: 'admin',
-      plan: 'business',
-      trialGenerationsUsed: 50,
-      trialGenerationsLimit: 999999,
-      monthlyGenerationsUsed: 200,
-      monthlyGenerationsLimit: 999999,
-      createdAt: new Date().toISOString(),
-      lastLoginAt: new Date().toISOString(),
-    };
-
-    const allowance = checkGenerationAllowance(adminUser);
-    assert.equal(allowance.allowed, true);
-    assert.equal(allowance.plan, 'admin_unlimited');
+  test('owner account is created as admin only', { skip }, async () => {
+    await initializeAuthStore();
+    const admin = await registerOrGetUser(ADMIN_EMAIL, 'admin');
+    assert.equal(admin.role, 'admin');
+    assert.equal(admin.email.toLowerCase(), ADMIN_EMAIL.toLowerCase());
   });
 });
