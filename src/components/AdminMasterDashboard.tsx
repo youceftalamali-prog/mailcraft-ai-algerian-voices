@@ -589,6 +589,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   const handleSaveAISettings = (e: React.FormEvent) => {
     e.preventDefault();
     saveAdminAISettings(aiSettings);
+    setAiSettings((current) => ({ ...current, apiKey: '' }));
     setSaveSettingsSuccess(true);
     setTimeout(() => setSaveSettingsSuccess(false), 3000);
   };
@@ -1339,7 +1340,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
                     إدارة مفتاح الـ API الخاص بـ Google AI Studio (`GEMINI_API_KEY`)
                   </h3>
                   <p className="text-xs text-slate-400">
-                    حقل آمن لإدخال وتحديث وفحص مفتاح الـ API مع السيرفر دون كشفه للعملاء.
+                    يمكن فحص مفتاح مؤقت هنا، لكنه لا يُحفظ في المتصفح. لتغيير مفتاح الإنتاج حدّث GEMINI_API_KEY في أسرار الخادم.
                   </p>
                 </div>
               </div>
@@ -1348,7 +1349,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
                   <span>مفتاح الـ API (Google Gemini API Key):</span>
                   <span className="text-[11px] text-emerald-400 font-normal">
-                    {aiSettings.apiKey ? 'تم ضبط مفتاح مخصص' : 'يتم استخدام المفتاح الافتراضي في بيئة الخادم'}
+                    {aiSettings.apiKey ? 'مفتاح مؤقت للفحص فقط' : 'مفتاح الخادم من إعدادات البيئة'}
                   </span>
                 </label>
 
@@ -1358,7 +1359,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
                     type={showApiKey ? 'text' : 'password'}
                     value={aiSettings.apiKey}
                     onChange={(e) => setAiSettings({ ...aiSettings, apiKey: e.target.value })}
-                    placeholder="AIzaSy..."
+                    placeholder="مفتاح مؤقت للفحص فقط"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl pr-10 pl-24 py-2.5 text-xs sm:text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
                   />
                   <div className="absolute top-2 left-2 flex items-center gap-1">
