@@ -402,9 +402,9 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
   };
 
   const handleUpgradeToProSimulated = () => {
-    setUserPlan('pro');
-    localStorage.setItem('dz_audio_user_plan', 'pro');
+    // A browser-side click must never grant a paid subscription.
     setShowUpgradeModal(false);
+    onNavigateToPricing?.();
   };
 
   const handleResetDemoTrial = () => {
@@ -421,6 +421,28 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
     setCopiedRipModal(true);
     setTimeout(() => setCopiedRipModal(false), 2500);
   };
+
+  // Server subscription and quota are authoritative; localStorage is display-only.
+  useEffect(() => {
+    if (!currentUserEmail) return;
+    let cancelled = false;
+    fetch('/api/auth/allowance', { credentials: 'same-origin' })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.json();
+      })
+      .then((allowance) => {
+        if (cancelled || !allowance) return;
+        const serverPlan: UserPlanTier =
+          allowance.plan === 'admin_unlimited' ? 'business' :
+          allowance.plan === 'free' ? 'free_trial' :
+          ['starter', 'pro', 'business'].includes(allowance.plan) ? allowance.plan : 'free_trial';
+        setUserPlan(serverPlan);
+        setFreeTrialUsed(serverPlan === 'free_trial' && allowance.remaining === 0);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentUserEmail]);
 
   // Cleanup audio on unmount
   useEffect(() => {
