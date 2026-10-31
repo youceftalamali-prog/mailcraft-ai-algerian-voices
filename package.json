@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/campaign.test.ts"
+    "test": "tsx --test src/utils/admin.test.ts src/utils/audioFallback.test.ts src/utils/campaign.test.ts src/utils/persona.test.ts src/utils/scraper.test.ts src/utils/security.test.ts src/utils/speechSynthesisService.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
