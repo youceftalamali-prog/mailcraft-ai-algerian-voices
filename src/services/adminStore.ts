@@ -336,7 +336,10 @@ export function loadAdminAISettings(): AdminAISettings {
     if (!raw) return INITIAL_AI_SETTINGS;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
-      return { ...INITIAL_AI_SETTINGS, ...parsed, apiKey: '' };
+      const sanitized = { ...INITIAL_AI_SETTINGS, ...parsed, apiKey: '' };
+      // Remove legacy API keys that older versions may have stored in localStorage.
+      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(sanitized));
+      return sanitized;
     }
   } catch (e) {
     console.warn('Failed to load AI settings from storage:', e);
