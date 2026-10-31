@@ -8,6 +8,8 @@ import {
   getSession,
   destroySession,
   registerOrGetUser,
+  createUser,
+  authenticateUser,
   getUserByEmail,
   checkGenerationAllowance,
   incrementGenerationUsage,
@@ -23,6 +25,16 @@ describe('Security & Authentication Subsystem', () => {
     assert.ok(hash.length >= 64, 'Password hash should be 64+ bytes hex');
     assert.equal(verifyPassword(password, salt, hash), true, 'Correct password must verify');
     assert.equal(verifyPassword('WrongPassword123', salt, hash), false, 'Incorrect password must fail');
+  });
+
+  test('new accounts require a strong password and authenticate only with the correct password', () => {
+    const email = `secure-${Date.now()}@example.test`;
+    assert.throws(() => createUser(email, 'short'), /WEAK_PASSWORD/);
+    const user = createUser(email, 'Correct-Horse-Battery-2026!');
+    assert.equal(user.role, 'user');
+    assert.equal(user.passwordHash === 'Correct-Horse-Battery-2026!', false);
+    assert.equal(authenticateUser(email, 'wrong-password'), null);
+    assert.equal(authenticateUser(email, 'Correct-Horse-Battery-2026!')?.id, user.id);
   });
 
   test('session creation, retrieval, and destruction', () => {
