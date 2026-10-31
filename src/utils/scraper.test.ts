@@ -4,6 +4,8 @@ import {
   ExtractedProductData,
   scrapeProductUrl,
   generateAdScriptFromProduct,
+  assertPublicHttpUrl,
+  isPrivateAddress,
 } from '../services/productScraperService.ts';
 
 test('scrapeProductUrl rejects invalid protocols gracefully', async () => {
@@ -12,16 +14,16 @@ test('scrapeProductUrl rejects invalid protocols gracefully', async () => {
       await scrapeProductUrl('ftp://invalid-url.com');
     },
     {
-      message: /غير صالح/i,
+      message: /غير صالح|غير مسموح/i,
     }
   );
 });
 
 test('scrapeProductUrl handles offline / mocked URLs with fallback product metadata', async () => {
-  const result = await scrapeProductUrl('https://my-store.dz/products/smart-watch-ultra-black');
+  const result = await scrapeProductUrl('https://example.com/products/smart-watch-ultra-black');
   assert.ok(result.title, 'Should have a product title');
   assert.ok(result.features.length > 0, 'Should have product features');
-  assert.equal(result.sourceUrl, 'https://my-store.dz/products/smart-watch-ultra-black');
+  assert.equal(result.sourceUrl, 'https://example.com/products/smart-watch-ultra-black');
 });
 
 test('generateAdScriptFromProduct fallback contains authentic Algiers dialect and COD', async () => {
@@ -59,4 +61,12 @@ test('generateAdScriptFromProduct fallback contains authentic Algiers dialect an
   for (const word of forbidden) {
     assert.equal(response.script.includes(word), false, `Script must not contain Moroccan word: ${word}`);
   }
+});
+
+test('product scraper blocks loopback, private, and reserved network addresses', async () => {
+  for (const address of ['127.0.0.1', '10.0.0.8', '192.168.1.10', '169.254.169.254', '::1', '::ffff:127.0.0.1']) {
+    assert.equal(isPrivateAddress(address), true, `Must block ${address}`);
+  }
+  await assert.rejects(assertPublicHttpUrl('http://127.0.0.1/admin'));
+  await assert.rejects(assertPublicHttpUrl('http://localhost/'));
 });
