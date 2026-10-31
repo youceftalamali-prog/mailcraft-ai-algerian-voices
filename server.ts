@@ -781,8 +781,8 @@ app.get('/api/admin/users', adminLimiter, requireAdmin, (_req: Request, res: Res
 app.post('/api/generate-persona-speech', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, persona, emotionalCue, extraDirectives } = req.body;
-    if (!scriptText) {
-      res.status(400).json({ error: 'scriptText is required' });
+    if (typeof scriptText !== 'string' || !scriptText.trim() || scriptText.length > 2500) {
+      res.status(400).json({ error: 'INVALID_SCRIPT', message: 'النص مطلوب ويجب ألا يتجاوز 2500 حرف.' });
       return;
     }
 
