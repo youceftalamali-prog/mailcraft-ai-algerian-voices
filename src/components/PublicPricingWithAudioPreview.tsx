@@ -1092,8 +1092,8 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
 
             {/* Success Feedback Notification */}
             {authSuccessMessage && (
-              <div className="mb-6 p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs sm:text-sm flex items-center gap-3">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              <div className="mb-6 p-4 rounded-2xl bg-amber-950/50 border border-amber-500/40 text-amber-100 text-xs sm:text-sm flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-300 shrink-0" />
                 <span>{authSuccessMessage}</span>
               </div>
             )}
@@ -1154,7 +1154,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   <input
                     type="password"
                     required
-                    minLength={6}
+                    minLength={10}
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
                     placeholder="••••••••"
