@@ -27,7 +27,6 @@ import {
   UserPlus,
   Layers,
   Star,
-  Crown
 } from 'lucide-react';
 import {
   AlgiersPersonaId,
@@ -38,7 +37,6 @@ import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';
 import {
   ShowcaseAudioSample,
   loadAdminShowcaseSamples,
-  ADMIN_EMAIL,
   isAdminUser,
   SAMPLES_UPDATED_EVENT,
 } from '../services/adminStore';
@@ -254,11 +252,6 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
           onError: () => setActivePlayingSampleId(null),
         });
       });
-  };
-
-  // Google OAuth remains unavailable until a real Google ID-token client is configured.
-  const handleGoogleSignIn = async () => {
-    setAuthSuccessMessage('تسجيل Google غير مفعّل حالياً لأسباب أمنية. استعمل البريد الإلكتروني وكلمة المرور.');
   };
 
   // Email registration/login: only show success after the server confirms it.
