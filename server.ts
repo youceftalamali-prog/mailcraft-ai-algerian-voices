@@ -214,8 +214,8 @@ app.get('/api/auth/allowance', requireAuth, (req: Request, res: Response): void 
 app.post('/api/generate-campaign', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, tone, audience, goal } = req.body;
-    if (!prompt) {
-      res.status(400).json({ error: 'Prompt is required' });
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) {
+      res.status(400).json({ error: 'INVALID_PROMPT', message: 'النص مطلوب ويجب ألا يتجاوز 4000 حرف.' });
       return;
     }
 
@@ -301,8 +301,8 @@ Generate:
 app.post('/api/generate-image', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, aspectRatio = '16:9', imageSize = '2K', style = 'Cinematic 3D Modern' } = req.body;
-    if (!prompt) {
-      res.status(400).json({ error: 'Prompt is required' });
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) {
+      res.status(400).json({ error: 'INVALID_PROMPT', message: 'النص مطلوب ويجب ألا يتجاوز 4000 حرف.' });
       return;
     }
 
@@ -391,8 +391,8 @@ app.post('/api/generate-image', genLimiter, requireAuth, async (req: Request, re
 app.post('/api/generate-voice-script', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, dialect = 'general', voice = 'Zephyr', tone, targetAudience } = req.body;
-    if (!prompt) {
-      res.status(400).json({ error: 'Prompt or script draft is required' });
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 5000) {
+      res.status(400).json({ error: 'INVALID_PROMPT', message: 'النص مطلوب ويجب ألا يتجاوز 5000 حرف.' });
       return;
     }
 
@@ -538,8 +538,8 @@ app.post('/api/generate-voice-script', genLimiter, requireAuth, consumeGeneratio
 app.post('/api/generate-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { text, voiceName = 'Zephyr', speechStyle } = req.body;
-    if (!text) {
-      res.status(400).json({ error: 'Text is required' });
+    if (typeof text !== 'string' || !text.trim() || text.length > 5000) {
+      res.status(400).json({ error: 'INVALID_TEXT', message: 'النص مطلوب ويجب ألا يتجاوز 5000 حرف.' });
       return;
     }
 
@@ -626,8 +626,8 @@ app.post('/api/generate-speech', genLimiter, requireAuth, consumeGenerationAllow
 app.post('/api/generate-ecommerce-ad-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, adContext, frenchLoanwords } = req.body;
-    if (!scriptText) {
-      res.status(400).json({ error: 'scriptText is required' });
+    if (typeof scriptText !== 'string' || !scriptText.trim() || scriptText.length > 5000) {
+      res.status(400).json({ error: 'INVALID_SCRIPT', message: 'النص مطلوب ويجب ألا يتجاوز 5000 حرف.' });
       return;
     }
 
@@ -823,8 +823,8 @@ app.post('/api/generate-persona-speech', genLimiter, requireAuth, async (req: Re
 app.post('/api/generate-script-from-url', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { productUrl, campaignType = 'ecommerce_flash_sale', persona = 'zephyr_warm' } = req.body;
-    if (!productUrl) {
-      res.status(400).json({ error: 'productUrl is required' });
+    if (typeof productUrl !== 'string' || !productUrl.trim() || productUrl.length > 2048) {
+      res.status(400).json({ error: 'INVALID_PRODUCT_URL', message: 'رابط المنتج مطلوب ويجب ألا يتجاوز 2048 حرفاً.' });
       return;
     }
 
@@ -862,7 +862,7 @@ app.post('/api/generate-script-from-url', genLimiter, requireAuth, async (req: R
 app.post('/api/chat', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { messages, model = 'gemini-3.8-flash', roleType = 'email_marketer' } = req.body;
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (!Array.isArray(messages) || messages.length === 0 || messages.length > 20 || messages.some((m: any) => !m || typeof m.content !== 'string' || m.content.length > 8000)) {
       res.status(400).json({ error: 'Messages array is required' });
       return;
     }
