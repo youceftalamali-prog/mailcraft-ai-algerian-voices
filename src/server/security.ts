@@ -75,16 +75,15 @@ function loadAuthData() {
 
 // Helper: Save persistent auth data
 function saveAuthData() {
-  try {
-    ensureDataDir();
-    const payload = {
-      users: Array.from(users.values()),
-      sessions: Array.from(sessions.values()),
-    };
-    fs.writeFileSync(AUTH_FILE, JSON.stringify(payload, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to save auth data to disk:', err);
-  }
+  // Fail closed: never report a successful signup/session if persistence failed.
+  ensureDataDir();
+  const payload = {
+    users: Array.from(users.values()),
+    sessions: Array.from(sessions.values()),
+  };
+  const temporaryFile = `${AUTH_FILE}.tmp`;
+  fs.writeFileSync(temporaryFile, JSON.stringify(payload, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  fs.renameSync(temporaryFile, AUTH_FILE);
 }
 
 // Ensure pre-seeded administrator
