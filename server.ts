@@ -388,7 +388,7 @@ app.post('/api/generate-image', genLimiter, requireAuth, async (req: Request, re
 
 // Endpoint: Unified Algerian Script Generation & Direct TTS Voiceover Pipeline
 // Fulfills Requirement 1 & 2: Receives user script/prompt, dialect, voice, and outputs refined script + playable WAV audio URL in one seamless call.
-app.post('/api/generate-voice-script', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-voice-script', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, dialect = 'general', voice = 'Zephyr', tone, targetAudience } = req.body;
     if (!prompt) {
@@ -535,7 +535,7 @@ app.post('/api/generate-voice-script', requireAuth, consumeGenerationAllowance, 
 
 // Endpoint: Generate Algerian Outro Voiceover / Speech
 // Uses gemini-3.8-flash-lite-tts or gemini-3.8-flash-tts
-app.post('/api/generate-speech', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { text, voiceName = 'Zephyr', speechStyle } = req.body;
     if (!text) {
@@ -623,7 +623,7 @@ app.post('/api/generate-speech', requireAuth, consumeGenerationAllowance, async 
 });
 
 // Endpoint: Specialized Algerian E-Commerce Ad Voice Generation (Algiers Dialect + Code-Switching)
-app.post('/api/generate-ecommerce-ad-speech', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-ecommerce-ad-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, adContext, frenchLoanwords } = req.body;
     if (!scriptText) {
@@ -859,7 +859,7 @@ app.post('/api/generate-script-from-url', genLimiter, requireAuth, async (req: R
 
 // Endpoint: Multi-Turn Gemini Chatbot
 // Supports gemini-3.8-flash (General), gemini-4-argon (Complex Tasks), gemini-3.1-flash-lite (Fast Tasks)
-app.post('/api/chat', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/chat', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { messages, model = 'gemini-3.8-flash', roleType = 'email_marketer' } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
