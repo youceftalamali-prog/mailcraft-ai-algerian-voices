@@ -78,12 +78,13 @@ const ai = new GoogleGenAI({
 });
 
 // Health-check endpoint
-app.get('/api/health', (_req: Request, res: Response): void => {
-  res.json({
-    status: 'ok',
-    uptimeSeconds: Math.floor(process.uptime()),
-    timestamp: new Date().toISOString(),
-  });
+app.get('/api/health', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    await verifyDatabaseConnection();
+    res.json({ status: 'ok', database: 'connected', uptimeSeconds: Math.floor(process.uptime()), timestamp: new Date().toISOString() });
+  } catch {
+    res.status(503).json({ status: 'unavailable', database: 'disconnected' });
+  }
 });
 
 // ----------------------------------------------------------------------------
@@ -1234,6 +1235,7 @@ With this new solution, you eliminate tedious guesswork and move straight to hig
 
 // Mount Vite or serve static assets
 async function startServer() {
+  await initializeAuthStore();
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
