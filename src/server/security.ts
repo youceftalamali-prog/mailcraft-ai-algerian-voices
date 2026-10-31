@@ -249,6 +249,18 @@ export function consumeGenerationAllowance(_req: Request, res: Response, next: N
         _req.user = current;
       }
       await client.query('COMMIT');
+
+      // A generation is charged only when the endpoint succeeds. Validation or
+      // provider failures return the reserved credit to the same usage bucket.
+      if (current.role !== 'admin') {
+        const reservedColumn = current.plan === 'free' ? 'trial_generations_used' : 'monthly_generations_used';
+        res.once('finish', () => {
+          if (res.statusCode < 400) return;
+          void getDatabasePool()
+            .query(`UPDATE app_users SET ${reservedColumn}=GREATEST(${reservedColumn}-1,0) WHERE id=$1`, [current.id])
+            .catch((refundError) => console.error('Failed to refund generation credit:', refundError));
+        });
+      }
       next();
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
@@ -261,6 +273,12 @@ export function rateLimiter(options: { windowMs: number; maxRequests: number; me
   return (req: Request, res: Response, next: NextFunction): void => {
     const key = req.user ? `user:${req.user.id}` : `ip:${req.ip || req.socket.remoteAddress || 'unknown'}`;
     const now = Date.now();
+    // Bound memory usage by pruning expired keys periodically.
+    if (rateLimitMap.size > 10_000) {
+      for (const [storedKey, storedEntry] of rateLimitMap) {
+        if (now > storedEntry.resetTime) rateLimitMap.delete(storedKey);
+      }
+    }
     const entry = rateLimitMap.get(key);
     if (!entry || now > entry.resetTime) { rateLimitMap.set(key, { count: 1, resetTime: now + windowMs }); next(); return; }
     if (entry.count >= maxRequests) { res.status(429).json({ error: 'RATE_LIMIT_EXCEEDED', message: message || 'تم تجاوز الحد الأقصى للطلبات مؤقتاً. يرجى الانتظار قليلاً قبل المحاولة مجدداً.', retryAfterMs: Math.max(0, entry.resetTime - now) }); return; }
