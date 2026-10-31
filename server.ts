@@ -25,6 +25,7 @@ import {
   authenticateUser,
   setUserPassword,
   getUserByEmail,
+  consumeGenerationAllowance,
   getAllUsers,
   ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
 } from './src/server/security';
@@ -210,7 +211,7 @@ app.get('/api/auth/allowance', (req: Request, res: Response): void => {
 });
 
 // Endpoint: Generate complete email marketing campaign
-app.post('/api/generate-campaign', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-campaign', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, tone, audience, goal } = req.body;
     if (!prompt) {
@@ -297,7 +298,7 @@ Generate:
 
 // Endpoint: Generate high-resolution email visuals with 1K, 2K, 4K affordance
 // Uses model gemini-3-pro-image-preview as required
-app.post('/api/generate-image', requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-image', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, aspectRatio = '16:9', imageSize = '2K', style = 'Cinematic 3D Modern' } = req.body;
     if (!prompt) {
@@ -387,7 +388,7 @@ app.post('/api/generate-image', requireAuth, async (req: Request, res: Response)
 
 // Endpoint: Unified Algerian Script Generation & Direct TTS Voiceover Pipeline
 // Fulfills Requirement 1 & 2: Receives user script/prompt, dialect, voice, and outputs refined script + playable WAV audio URL in one seamless call.
-app.post('/api/generate-voice-script', requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-voice-script', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, dialect = 'general', voice = 'Zephyr', tone, targetAudience } = req.body;
     if (!prompt) {
@@ -534,7 +535,7 @@ app.post('/api/generate-voice-script', requireAuth, async (req: Request, res: Re
 
 // Endpoint: Generate Algerian Outro Voiceover / Speech
 // Uses gemini-3.8-flash-lite-tts or gemini-3.8-flash-tts
-app.post('/api/generate-speech', requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-speech', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { text, voiceName = 'Zephyr', speechStyle } = req.body;
     if (!text) {
@@ -622,7 +623,7 @@ app.post('/api/generate-speech', requireAuth, async (req: Request, res: Response
 });
 
 // Endpoint: Specialized Algerian E-Commerce Ad Voice Generation (Algiers Dialect + Code-Switching)
-app.post('/api/generate-ecommerce-ad-speech', requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-ecommerce-ad-speech', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, adContext, frenchLoanwords } = req.body;
     if (!scriptText) {
@@ -819,7 +820,7 @@ app.post('/api/generate-persona-speech', genLimiter, requireAuth, async (req: Re
 });
 
 // Endpoint: Extract Product Data from URL & Generate Algiers E-Commerce Ad Script
-app.post('/api/generate-script-from-url', requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-script-from-url', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { productUrl, campaignType = 'ecommerce_flash_sale', persona = 'zephyr_warm' } = req.body;
     if (!productUrl) {
@@ -858,7 +859,7 @@ app.post('/api/generate-script-from-url', requireAuth, async (req: Request, res:
 
 // Endpoint: Multi-Turn Gemini Chatbot
 // Supports gemini-3.8-flash (General), gemini-4-argon (Complex Tasks), gemini-3.1-flash-lite (Fast Tasks)
-app.post('/api/chat', requireAuth, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/chat', requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { messages, model = 'gemini-3.8-flash', roleType = 'email_marketer' } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
