@@ -116,7 +116,8 @@ app.post('/api/auth/login', authLimiter, (req: Request, res: Response): void => 
     }
   } catch (err) {
     const code = err instanceof Error ? err.message : '';
-    const status = code === 'ACCOUNT_EXISTS' ? 409 : 400;
+    const validationErrors = ['ADMIN_REGISTRATION_DISABLED', 'INVALID_EMAIL', 'WEAK_PASSWORD'];
+    const status = code === 'ACCOUNT_EXISTS' ? 409 : validationErrors.includes(code) ? 400 : 500;
     const messages: Record<string, string> = {
       ACCOUNT_EXISTS: 'هذا الحساب موجود بالفعل. اختر تسجيل الدخول.',
       ADMIN_REGISTRATION_DISABLED: 'تسجيل حساب المالك غير متاح من هذه الصفحة.',
