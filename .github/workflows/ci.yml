@@ -24,3 +24,5 @@ jobs:
         run: npm test
       - name: Production build
         run: npm run build
+      - name: Build Cloud Run container
+        run: docker build --tag mailcraft-ai:ci .
