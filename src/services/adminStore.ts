@@ -336,7 +336,7 @@ export function loadAdminAISettings(): AdminAISettings {
     if (!raw) return INITIAL_AI_SETTINGS;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
-      return { ...INITIAL_AI_SETTINGS, ...parsed };
+      return { ...INITIAL_AI_SETTINGS, ...parsed, apiKey: '' };
     }
   } catch (e) {
     console.warn('Failed to load AI settings from storage:', e);
@@ -346,7 +346,7 @@ export function loadAdminAISettings(): AdminAISettings {
 
 export function saveAdminAISettings(settings: AdminAISettings): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify({ ...settings, apiKey: '' }));
   } catch (e) {
     console.warn('Failed to save AI settings to storage:', e);
   }
