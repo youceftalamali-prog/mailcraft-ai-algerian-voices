@@ -438,6 +438,22 @@ export function checkGenerationAllowance(user?: ServerUser): {
   };
 }
 
+// Enforce and consume one server-side generation credit for protected AI endpoints.
+export function consumeGenerationAllowance(req: Request, res: Response, next: NextFunction): void {
+  const allowance = checkGenerationAllowance(req.user);
+  if (!allowance.allowed) {
+    res.status(403).json({
+      error: 'USAGE_LIMIT_EXCEEDED',
+      message: allowance.reason,
+      remaining: allowance.remaining,
+      plan: allowance.plan,
+    });
+    return;
+  }
+  if (req.user) incrementGenerationUsage(req.user);
+  next();
+}
+
 export function incrementGenerationUsage(user?: ServerUser): void {
   if (!user) return;
   if (user.role === 'admin') return;
