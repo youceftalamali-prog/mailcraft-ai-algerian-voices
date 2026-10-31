@@ -172,7 +172,7 @@ export async function getSession(token?: string | null): Promise<ServerSession |
 }
 
 export function setAuthCookie(res: Response, token: string, maxAgeDays = 7): void {
-  res.setHeader('Set-Cookie', [`dz_session=${token}`, 'Path=/', 'HttpOnly', 'Secure', 'SameSite=Lax', `Max-Age=${maxAgeDays * 86400}'].join('; '));
+  res.setHeader('Set-Cookie', [`dz_session=${token}`, 'Path=/', 'HttpOnly', 'Secure', 'SameSite=Lax', `Max-Age=${maxAgeDays * 86400}`].join('; '));
 }
 export function clearAuthCookie(res: Response): void {
   res.setHeader('Set-Cookie', 'dz_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
