@@ -70,21 +70,21 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleUserLogin = async (email: string) => {
-    const clean = email.trim();
-    setCurrentUserEmail(clean);
     try {
-      localStorage.setItem('dz_user_email', clean);
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: clean }),
-      });
+      const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
       const data = await res.json();
-      if (data.success && data.user) {
+      if (res.ok && data.authenticated && data.user && data.user.email.toLowerCase() === email.trim().toLowerCase()) {
+        setCurrentUserEmail(data.user.email);
         setCurrentUserRole(data.user.role);
+        localStorage.setItem('dz_user_email', data.user.email);
+      } else {
+        setCurrentUserEmail(null);
+        setCurrentUserRole(null);
       }
     } catch (err) {
-      console.warn('Server login sync error:', err);
+      console.warn('Server session verification failed:', err);
+      setCurrentUserEmail(null);
+      setCurrentUserRole(null);
     }
   };
 
@@ -103,28 +103,7 @@ export default function App() {
   };
 
   const handleQuickAdminLogin = async () => {
-    try {
-      const res = await fetch('/api/auth/admin-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: ADMIN_EMAIL, password: 'AdminAlgiers2026!' }),
-      });
-      const data = await res.json();
-      if (data.success && data.user) {
-        setCurrentUserEmail(data.user.email);
-        setCurrentUserRole('admin');
-        try {
-          localStorage.setItem('dz_user_email', data.user.email);
-        } catch {}
-        setActiveTab('admin');
-      } else {
-        setAdminLoginError(data.message || 'فشل تسجيل الدخول الإداري');
-      }
-    } catch {
-      // Fallback
-      handleUserLogin(ADMIN_EMAIL);
-      setActiveTab('admin');
-    }
+    setAdminLoginError('الدخول السريع للمدير غير متاح. أدخل كلمة مرور المدير السرية للتحقق من هويتك.');
   };
 
   const handleAdminFormSubmit = async (e: React.FormEvent) => {
