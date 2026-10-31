@@ -9,6 +9,7 @@ interface HeaderProps {
   setActiveTab: (tab: AppTab) => void;
   onOpenSample?: () => void;
   currentUserEmail?: string | null;
+  isAdmin?: boolean;
   onSignOut?: () => void;
   onQuickAdminLogin?: () => void;
 }
@@ -18,10 +19,11 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   onOpenSample,
   currentUserEmail,
+  isAdmin: isAdminProp,
   onSignOut,
   onQuickAdminLogin,
 }) => {
-  const isAdmin = isAdminUser(currentUserEmail);
+  const isAdmin = isAdminProp !== undefined ? isAdminProp : isAdminUser(currentUserEmail);
 
   return (
     <header className="border-b border-slate-800 bg-slate-950/90 backdrop-blur-md sticky top-0 z-40">

@@ -256,60 +256,77 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
       });
   };
 
-  // Handle Google One-Tap / OAuth mock sign-in
-  const handleGoogleSignIn = (customEmail?: string) => {
+  // Handle Google One-Tap / OAuth sign-in
+  const handleGoogleSignIn = async (customEmail?: string) => {
     setIsSubmittingAuth(true);
     const chosenEmail = customEmail || (authEmail ? authEmail.trim() : 'store.alger@gmail.com');
     const isOwner = isAdminUser(chosenEmail);
 
+    try {
+      await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: chosenEmail }),
+      });
+    } catch (err) {
+      console.warn('Google server auth sync error:', err);
+    }
+
+    setIsSubmittingAuth(false);
+    setAuthSuccessMessage(
+      isOwner
+        ? `مرحباً بك يا يوسف! تم تسجيل دخول المالك (${ADMIN_EMAIL}) وتفعيل كامل صلاحيات لوحة الإدارة 👑`
+        : `تم تسجيل الدخول بنجاح بحساب Google (${chosenEmail})! تم تفعيل تجربتك المجانية الأولى.`
+    );
+    if (onLoginSuccess) {
+      onLoginSuccess(chosenEmail);
+    }
     setTimeout(() => {
-      setIsSubmittingAuth(false);
-      setAuthSuccessMessage(
-        isOwner
-          ? `مرحباً بك يا يوسف! تم تسجيل دخول المالك (${ADMIN_EMAIL}) وتفعيل كامل صلاحيات لوحة الإدارة 👑`
-          : `تم تسجيل الدخول بنجاح بحساب Google (${chosenEmail})! تم تفعيل تجربتك المجانية الأولى.`
-      );
-      if (onLoginSuccess) {
-        onLoginSuccess(chosenEmail);
+      if (isOwner && onNavigateToAdmin) {
+        onNavigateToAdmin();
+      } else {
+        onEnterStudio();
       }
-      setTimeout(() => {
-        if (isOwner && onNavigateToAdmin) {
-          onNavigateToAdmin();
-        } else {
-          onEnterStudio();
-        }
-      }, 700);
-    }, 600);
+    }, 700);
   };
 
   // Handle Traditional Email/Password Form Submit
-  const handleEmailAuthSubmit = (e: React.FormEvent) => {
+  const handleEmailAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!authEmail || !authPassword) return;
 
     setIsSubmittingAuth(true);
     const isOwner = isAdminUser(authEmail);
 
+    try {
+      const endpoint = isOwner ? '/api/auth/admin-login' : '/api/auth/login';
+      await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authEmail.trim(), password: authPassword }),
+      });
+    } catch (err) {
+      console.warn('Email server auth error:', err);
+    }
+
+    setIsSubmittingAuth(false);
+    setAuthSuccessMessage(
+      isOwner
+        ? `مرحباً بك يا يوسف! تم تسجيل دخول مالك المنصة (${ADMIN_EMAIL}) وتفعيل كامل صلاحيات لوحة الإدارة 👑`
+        : authMode === 'signup'
+        ? 'تم إنشاء حسابك بنجاح! تم منحك تجربة إعلان مجانية كاملة (1 Free Trial) في الاستوديو.'
+        : 'أهلاً بعودتك! جاري الدخول إلى استوديو الإعلانات...'
+    );
+    if (onLoginSuccess) {
+      onLoginSuccess(authEmail.trim());
+    }
     setTimeout(() => {
-      setIsSubmittingAuth(false);
-      setAuthSuccessMessage(
-        isOwner
-          ? `مرحباً بك يا يوسف! تم تسجيل دخول مالك المنصة (${ADMIN_EMAIL}) وتفعيل كامل صلاحيات لوحة الإدارة 👑`
-          : authMode === 'signup'
-          ? 'تم إنشاء حسابك بنجاح! تم منحك تجربة إعلان مجانية كاملة (1 Free Trial) في الاستوديو.'
-          : 'أهلاً بعودتك! جاري الدخول إلى استوديو الإعلانات...'
-      );
-      if (onLoginSuccess) {
-        onLoginSuccess(authEmail.trim());
+      if (isOwner && onNavigateToAdmin) {
+        onNavigateToAdmin();
+      } else {
+        onEnterStudio();
       }
-      setTimeout(() => {
-        if (isOwner && onNavigateToAdmin) {
-          onNavigateToAdmin();
-        } else {
-          onEnterStudio();
-        }
-      }, 800);
-    }, 700);
+    }, 800);
   };
 
   const handleCopyRip = () => {

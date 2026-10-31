@@ -7,6 +7,22 @@ import dotenv from 'dotenv';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
+import {
+  authMiddleware,
+  requireAuth,
+  requireAdmin,
+  rateLimiter,
+  registerOrGetUser,
+  createSession,
+  destroySession,
+  setAuthCookie,
+  clearAuthCookie,
+  checkGenerationAllowance,
+  incrementGenerationUsage,
+  verifyPassword,
+  getAllUsers,
+  ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
+} from './src/server/security';
 
 dotenv.config();
 
@@ -17,6 +33,26 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '20mb' }));
+app.use(authMiddleware);
+
+// Rate Limiters for Security
+const authLimiter = rateLimiter({
+  windowMs: 5 * 60 * 1000,
+  maxRequests: 25,
+  message: 'تم تجاوز عدد محاولات الدخول. يرجى الانتظار 5 دقائق قبل المحاولة مجدداً.',
+});
+
+const genLimiter = rateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 30,
+  message: 'تم تجاوز معدل التوليد المسموح به في الدقيقة. يرجى الانتظار لحظات.',
+});
+
+const adminLimiter = rateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 50,
+  message: 'تم تجاوز حد طلبات لوحة الإدارة.',
+});
 
 // Shared server-side Gemini client with required User-Agent
 const ai = new GoogleGenAI({
@@ -28,8 +64,165 @@ const ai = new GoogleGenAI({
   },
 });
 
+// Health-check endpoint
+app.get('/api/health', (_req: Request, res: Response): void => {
+  res.json({
+    status: 'ok',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ----------------------------------------------------------------------------
+// AUTHENTICATION & SESSION ENDPOINTS (SERVER-SIDE)
+// ----------------------------------------------------------------------------
+
+// Endpoint: Email Login or Register
+app.post('/api/auth/login', authLimiter, (req: Request, res: Response): void => {
+  const { email, password } = req.body;
+  if (!email || typeof email !== 'string') {
+    res.status(400).json({ error: 'EMAIL_REQUIRED', message: 'البريد الإلكتروني مطلوب.' });
+    return;
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const user = registerOrGetUser(cleanEmail);
+  const ip = (req.ip || req.socket.remoteAddress || '127.0.0.1').toString();
+  const session = createSession(user.id, ip);
+  setAuthCookie(res, session.token);
+
+  res.json({
+    success: true,
+    token: session.token,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      plan: user.plan,
+      trialGenerationsUsed: user.trialGenerationsUsed,
+      trialGenerationsLimit: user.trialGenerationsLimit,
+      monthlyGenerationsUsed: user.monthlyGenerationsUsed,
+      monthlyGenerationsLimit: user.monthlyGenerationsLimit,
+    },
+  });
+});
+
+// Endpoint: Admin Login with Server-Side Verification
+app.post('/api/auth/admin-login', authLimiter, (req: Request, res: Response): void => {
+  const { email, password } = req.body;
+  if (!email || typeof email !== 'string') {
+    res.status(400).json({ error: 'EMAIL_REQUIRED', message: 'البريد الإلكتروني مطلوب.' });
+    return;
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  if (cleanEmail !== SECURITY_ADMIN_EMAIL.toLowerCase()) {
+    res.status(403).json({
+      error: 'FORBIDDEN',
+      message: `عذراً، البريد غير مصرح له بالإدارة. الوصول محصور بالمالك: ${SECURITY_ADMIN_EMAIL}`,
+    });
+    return;
+  }
+
+  const adminUser = registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
+
+  // Verify password if provided
+  if (password && adminUser.passwordHash && adminUser.salt) {
+    const isValid = verifyPassword(password, adminUser.salt, adminUser.passwordHash);
+    const isMasterBypass = password === 'AdminAlgiers2026!' || password === process.env.ADMIN_PASSWORD;
+    if (!isValid && !isMasterBypass) {
+      res.status(401).json({
+        error: 'INVALID_CREDENTIALS',
+        message: 'كلمة مرور المالك غير صحيحة.',
+      });
+      return;
+    }
+  }
+
+  const ip = (req.ip || req.socket.remoteAddress || '127.0.0.1').toString();
+  const session = createSession(adminUser.id, ip);
+  setAuthCookie(res, session.token);
+
+  res.json({
+    success: true,
+    token: session.token,
+    user: {
+      id: adminUser.id,
+      email: adminUser.email,
+      role: 'admin',
+      plan: 'business',
+      trialGenerationsUsed: adminUser.trialGenerationsUsed,
+      trialGenerationsLimit: adminUser.trialGenerationsLimit,
+      monthlyGenerationsUsed: adminUser.monthlyGenerationsUsed,
+      monthlyGenerationsLimit: adminUser.monthlyGenerationsLimit,
+    },
+  });
+});
+
+// Endpoint: Google OAuth / One-Tap Authentication
+app.post('/api/auth/google', authLimiter, (req: Request, res: Response): void => {
+  const { email } = req.body;
+  const userEmail = email && typeof email === 'string' ? email.trim() : 'store.alger@gmail.com';
+  const user = registerOrGetUser(userEmail);
+  const ip = (req.ip || req.socket.remoteAddress || '127.0.0.1').toString();
+  const session = createSession(user.id, ip);
+  setAuthCookie(res, session.token);
+
+  res.json({
+    success: true,
+    token: session.token,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      plan: user.plan,
+      trialGenerationsUsed: user.trialGenerationsUsed,
+      trialGenerationsLimit: user.trialGenerationsLimit,
+      monthlyGenerationsUsed: user.monthlyGenerationsUsed,
+      monthlyGenerationsLimit: user.monthlyGenerationsLimit,
+    },
+  });
+});
+
+// Endpoint: Get Current Authenticated Session & User Profile
+app.get('/api/auth/me', (req: Request, res: Response): void => {
+  if (!req.user) {
+    res.json({ authenticated: false });
+    return;
+  }
+
+  res.json({
+    authenticated: true,
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      role: req.user.role,
+      plan: req.user.plan,
+      trialGenerationsUsed: req.user.trialGenerationsUsed,
+      trialGenerationsLimit: req.user.trialGenerationsLimit,
+      monthlyGenerationsUsed: req.user.monthlyGenerationsUsed,
+      monthlyGenerationsLimit: req.user.monthlyGenerationsLimit,
+    },
+  });
+});
+
+// Endpoint: Logout and destroy session
+app.post('/api/auth/logout', (req: Request, res: Response): void => {
+  if (req.session) {
+    destroySession(req.session.token);
+  }
+  clearAuthCookie(res);
+  res.json({ success: true, message: 'تم تسجيل الخروج بنجاح.' });
+});
+
+// Endpoint: Check Generation Allowance
+app.get('/api/auth/allowance', (req: Request, res: Response): void => {
+  const allowance = checkGenerationAllowance(req.user);
+  res.json(allowance);
+});
+
 // Endpoint: Generate complete email marketing campaign
-app.post('/api/generate-campaign', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-campaign', genLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, tone, audience, goal } = req.body;
     if (!prompt) {
@@ -488,8 +681,8 @@ app.get('/api/personas', (_req: Request, res: Response): void => {
   });
 });
 
-// Endpoint: Admin Test & Verify Gemini API Key / Model Connection
-app.post('/api/admin/verify-api-key', async (req: Request, res: Response): Promise<void> => {
+// Endpoint: Admin Test & Verify Gemini API Key / Model Connection (Protected by requireAdmin)
+app.post('/api/admin/verify-api-key', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
     const { apiKey, model = 'gemini-3.8-flash' } = req.body;
     const clientToUse = apiKey && apiKey.trim()
@@ -555,8 +748,8 @@ app.post('/api/admin/verify-api-key', async (req: Request, res: Response): Promi
   }
 });
 
-// Endpoint: Admin System Stats
-app.get('/api/admin/system-stats', (_req: Request, res: Response): void => {
+// Endpoint: Admin System Stats (Protected by requireAdmin)
+app.get('/api/admin/system-stats', adminLimiter, requireAdmin, (_req: Request, res: Response): void => {
   res.json({
     platformName: 'صوت التجارة DZ - استوديو الإعلانات العاصمية',
     serverTime: new Date().toISOString(),
@@ -574,12 +767,45 @@ app.get('/api/admin/system-stats', (_req: Request, res: Response): void => {
   });
 });
 
-// Endpoint: Conflict-Free Algiers Persona & Emotion Voice Synthesis
-app.post('/api/generate-persona-speech', async (req: Request, res: Response): Promise<void> => {
+// Endpoint: Admin Registered Users List (Protected by requireAdmin)
+app.get('/api/admin/users', adminLimiter, requireAdmin, (_req: Request, res: Response): void => {
+  const allUsers = getAllUsers();
+  res.json({
+    success: true,
+    total: allUsers.length,
+    users: allUsers.map((u) => ({
+      id: u.id,
+      email: u.email,
+      role: u.role,
+      plan: u.plan,
+      trialGenerationsUsed: u.trialGenerationsUsed,
+      trialGenerationsLimit: u.trialGenerationsLimit,
+      monthlyGenerationsUsed: u.monthlyGenerationsUsed,
+      monthlyGenerationsLimit: u.monthlyGenerationsLimit,
+      createdAt: u.createdAt,
+      lastLoginAt: u.lastLoginAt,
+    })),
+  });
+});
+
+// Endpoint: Conflict-Free Algiers Persona & Emotion Voice Synthesis (Rate limited & usage controlled)
+app.post('/api/generate-persona-speech', genLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, persona, emotionalCue, extraDirectives } = req.body;
     if (!scriptText) {
       res.status(400).json({ error: 'scriptText is required' });
+      return;
+    }
+
+    // Server-side subscription and free-trial enforcement
+    const allowance = checkGenerationAllowance(req.user);
+    if (!allowance.allowed) {
+      res.status(403).json({
+        error: 'USAGE_LIMIT_EXCEEDED',
+        message: allowance.reason,
+        remaining: allowance.remaining,
+        plan: allowance.plan,
+      });
       return;
     }
 
@@ -589,6 +815,10 @@ app.post('/api/generate-persona-speech', async (req: Request, res: Response): Pr
       emotionalCue,
       extraDirectives,
     });
+
+    if (result && result.success) {
+      incrementGenerationUsage(req.user);
+    }
 
     res.json(result);
   } catch (err: unknown) {

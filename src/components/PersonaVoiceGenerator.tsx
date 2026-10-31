@@ -291,7 +291,12 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `خطأ في الخادم (${response.status})`);
+        if (response.status === 403 && errorData.error === 'USAGE_LIMIT_EXCEEDED') {
+          setFreeTrialUsed(true);
+          setShowUpgradeModal(true);
+          throw new Error(errorData.message || 'لقد استهلكت إعلان التجربة المجاني.');
+        }
+        throw new Error(errorData.message || errorData.error || `خطأ في الخادم (${response.status})`);
       }
 
       const data = await response.json();
