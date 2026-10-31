@@ -5,10 +5,12 @@ import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { verifyDatabaseConnection } from './src/server/database';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
 import {
+  initializeAuthStore,
   authMiddleware,
   requireAuth,
   requireAdmin,
@@ -89,7 +91,7 @@ app.get('/api/health', (_req: Request, res: Response): void => {
 // ----------------------------------------------------------------------------
 
 // Endpoint: Email registration and password login
-app.post('/api/auth/login', authLimiter, (req: Request, res: Response): void => {
+app.post('/api/auth/login', authLimiter, async (req: Request, res: Response): Promise<void> => {
   const { email, password, mode = 'login' } = req.body || {};
   if (typeof email !== 'string' || typeof password !== 'string') {
     res.status(400).json({ error: 'CREDENTIALS_REQUIRED', message: 'البريد الإلكتروني وكلمة المرور مطلوبان.' });
@@ -103,9 +105,9 @@ app.post('/api/auth/login', authLimiter, (req: Request, res: Response): void => 
   let user;
   try {
     if (mode === 'signup') {
-      user = createUser(email, password);
+      user = await createUser(email, password);
     } else if (mode === 'login') {
-      user = authenticateUser(email, password);
+      user = await authenticateUser(email, password);
       if (!user) {
         res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
         return;
@@ -129,7 +131,7 @@ app.post('/api/auth/login', authLimiter, (req: Request, res: Response): void => 
   }
 
   const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
-  const session = createSession(user.id, ip);
+  const session = await createSession(user.id, ip);
   setAuthCookie(res, session.token);
   res.json({ success: true, user: {
     id: user.id, email: user.email, role: user.role, plan: user.plan,
@@ -139,7 +141,7 @@ app.post('/api/auth/login', authLimiter, (req: Request, res: Response): void => 
 });
 
 // Owner login: requires a separately configured high-entropy ADMIN_PASSWORD secret.
-app.post('/api/auth/admin-login', authLimiter, (req: Request, res: Response): void => {
+app.post('/api/auth/admin-login', authLimiter, async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body || {};
   const configuredSecret = process.env.ADMIN_PASSWORD;
   if (!configuredSecret || configuredSecret.length < 16) {
@@ -158,14 +160,14 @@ app.post('/api/auth/admin-login', authLimiter, (req: Request, res: Response): vo
     return;
   }
 
-  let adminUser = getUserByEmail(SECURITY_ADMIN_EMAIL);
-  if (!adminUser) adminUser = registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
+  let adminUser = await getUserByEmail(SECURITY_ADMIN_EMAIL);
+  if (!adminUser) adminUser = await registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
   // Rotate any legacy seeded/default hash to the configured deployment secret.
   if (!adminUser.passwordHash || !adminUser.salt || !verifyPassword(password, adminUser.salt, adminUser.passwordHash)) {
-    adminUser = setUserPassword(adminUser.id, configuredSecret) || adminUser;
+    adminUser = (await setUserPassword(adminUser.id, configuredSecret)) || adminUser;
   }
   const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
-  const session = createSession(adminUser.id, ip);
+  const session = await createSession(adminUser.id, ip);
   setAuthCookie(res, session.token);
   res.json({ success: true, user: {
     id: adminUser.id, email: adminUser.email, role: 'admin', plan: 'business',
@@ -202,9 +204,9 @@ app.get('/api/auth/me', (req: Request, res: Response): void => {
 });
 
 // Endpoint: Logout and destroy session
-app.post('/api/auth/logout', (req: Request, res: Response): void => {
+app.post('/api/auth/logout', async (req: Request, res: Response): Promise<void> => {
   if (req.session) {
-    destroySession(req.session.token);
+    await destroySession(req.session.token);
   }
   clearAuthCookie(res);
   res.json({ success: true, message: 'تم تسجيل الخروج بنجاح.' });
@@ -763,8 +765,8 @@ app.get('/api/admin/system-stats', adminLimiter, requireAdmin, (_req: Request, r
 });
 
 // Endpoint: Admin Registered Users List (Protected by requireAdmin)
-app.get('/api/admin/users', adminLimiter, requireAdmin, (_req: Request, res: Response): void => {
-  const allUsers = getAllUsers();
+app.get('/api/admin/users', adminLimiter, requireAdmin, async (_req: Request, res: Response): Promise<void> => {
+  const allUsers = await getAllUsers();
   res.json({
     success: true,
     total: allUsers.length,
@@ -812,7 +814,7 @@ app.post('/api/generate-persona-speech', genLimiter, requireAuth, async (req: Re
     });
 
     if (result && result.success) {
-      incrementGenerationUsage(req.user);
+      await incrementGenerationUsage(req.user);
     }
 
     res.json(result);
