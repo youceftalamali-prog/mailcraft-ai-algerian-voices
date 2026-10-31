@@ -46,6 +46,12 @@ export default function App() {
           try {
             localStorage.setItem('dz_user_email', data.user.email);
           } catch {}
+        } else {
+          setCurrentUserEmail(null);
+          setCurrentUserRole(null);
+          try {
+            localStorage.removeItem('dz_user_email');
+          } catch {}
         }
       })
       .catch(() => {});
