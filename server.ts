@@ -38,7 +38,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(authMiddleware);
 
 // Rate Limiters for Security
@@ -205,7 +205,7 @@ app.post('/api/auth/logout', (req: Request, res: Response): void => {
 });
 
 // Endpoint: Check Generation Allowance
-app.get('/api/auth/allowance', (req: Request, res: Response): void => {
+app.get('/api/auth/allowance', requireAuth, (req: Request, res: Response): void => {
   const allowance = checkGenerationAllowance(req.user);
   res.json(allowance);
 });
