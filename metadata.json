@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix MailCraft AI — Algerian Voices",
+  "description": "افحص تعليمات اللهجات الجزائرية واختيار أصوات Gemini TTS. لماذا قد ينتج الخيار الوهراني نطقاً مغربياً؟ لا تغيّر الكود. اقترح تعديلات محددة تحافظ على الصوت العاصمي الحالي.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
