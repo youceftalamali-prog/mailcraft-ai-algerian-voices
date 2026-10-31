@@ -1138,7 +1138,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                 onClick={() => {
                   setAuthEmail(ADMIN_EMAIL);
                   setAuthPassword('admin-owner-pass');
-                  handleGoogleSignIn(ADMIN_EMAIL);
+                  handleGoogleSignIn();
                 }}
                 disabled={isSubmittingAuth}
                 className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-black text-amber-300 bg-gradient-to-r from-amber-500/15 via-indigo-600/20 to-emerald-500/15 hover:from-amber-500/25 hover:to-emerald-500/25 border border-amber-500/40 hover:border-amber-300 transition-all cursor-pointer shadow-sm hover:scale-[1.01]"
