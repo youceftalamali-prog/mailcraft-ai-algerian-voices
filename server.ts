@@ -5,7 +5,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { verifyDatabaseConnection } from './src/server/database';
+import { verifyDatabaseConnection, closeDatabasePool } from './src/server/database';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
@@ -1233,9 +1233,28 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`CampaignForge Server running on http://0.0.0.0:${PORT}`);
+  const httpServer = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`MailCraft AI server running on port ${PORT}`);
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}; shutting down gracefully.`);
+    httpServer.close(async (error) => {
+      if (error) console.error('HTTP server shutdown error:', error);
+      try {
+        await closeDatabasePool();
+      } catch (dbError) {
+        console.error('Database pool shutdown error:', dbError);
+      } finally {
+        process.exit(error ? 1 : 0);
+      }
+    });
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch((err) => {
