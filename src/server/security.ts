@@ -278,15 +278,14 @@ export function registerOrGetUser(email: string, role: 'admin' | 'user' = 'user'
 
 // Cookie Helper
 export function setAuthCookie(res: Response, token: string, maxAgeDays = 7) {
-  const isProd = process.env.NODE_ENV === 'production';
   const cookieOptions = [
     `dz_session=${token}`,
-    `Path=/`,
-    `HttpOnly`,
-    `SameSite=Lax`,
+    'Path=/',
+    'HttpOnly',
+    'Secure',
+    'SameSite=Lax',
     `Max-Age=${maxAgeDays * 24 * 60 * 60}`,
-    isProd ? 'Secure' : '',
-  ].filter(Boolean).join('; ');
+  ].join('; ');
 
   res.setHeader('Set-Cookie', cookieOptions);
 }
@@ -294,7 +293,7 @@ export function setAuthCookie(res: Response, token: string, maxAgeDays = 7) {
 export function clearAuthCookie(res: Response) {
   res.setHeader(
     'Set-Cookie',
-    'dz_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    'dz_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
   );
 }
 
