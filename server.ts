@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
@@ -20,6 +21,10 @@ import {
   checkGenerationAllowance,
   incrementGenerationUsage,
   verifyPassword,
+  createUser,
+  authenticateUser,
+  setUserPassword,
+  getUserByEmail,
   getAllUsers,
   ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
 } from './src/server/security';
@@ -77,111 +82,94 @@ app.get('/api/health', (_req: Request, res: Response): void => {
 // AUTHENTICATION & SESSION ENDPOINTS (SERVER-SIDE)
 // ----------------------------------------------------------------------------
 
-// Endpoint: Email Login or Register
+// Endpoint: Email registration and password login
 app.post('/api/auth/login', authLimiter, (req: Request, res: Response): void => {
-  const { email, password } = req.body;
-  if (!email || typeof email !== 'string') {
-    res.status(400).json({ error: 'EMAIL_REQUIRED', message: 'البريد الإلكتروني مطلوب.' });
+  const { email, password, mode = 'login' } = req.body || {};
+  if (typeof email !== 'string' || typeof password !== 'string') {
+    res.status(400).json({ error: 'CREDENTIALS_REQUIRED', message: 'البريد الإلكتروني وكلمة المرور مطلوبان.' });
+    return;
+  }
+  if (password.length > 128 || password.length < 10) {
+    res.status(400).json({ error: 'INVALID_PASSWORD', message: 'كلمة المرور يجب أن تكون بين 10 و128 حرفاً.' });
     return;
   }
 
-  const cleanEmail = email.trim().toLowerCase();
-  const user = registerOrGetUser(cleanEmail);
-  const ip = (req.ip || req.socket.remoteAddress || '127.0.0.1').toString();
-  const session = createSession(user.id, ip);
-  setAuthCookie(res, session.token);
-
-  res.json({
-    success: true,
-    token: session.token,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      plan: user.plan,
-      trialGenerationsUsed: user.trialGenerationsUsed,
-      trialGenerationsLimit: user.trialGenerationsLimit,
-      monthlyGenerationsUsed: user.monthlyGenerationsUsed,
-      monthlyGenerationsLimit: user.monthlyGenerationsLimit,
-    },
-  });
-});
-
-// Endpoint: Admin Login with Server-Side Verification
-app.post('/api/auth/admin-login', authLimiter, (req: Request, res: Response): void => {
-  const { email, password } = req.body;
-  if (!email || typeof email !== 'string') {
-    res.status(400).json({ error: 'EMAIL_REQUIRED', message: 'البريد الإلكتروني مطلوب.' });
-    return;
-  }
-
-  const cleanEmail = email.trim().toLowerCase();
-  if (cleanEmail !== SECURITY_ADMIN_EMAIL.toLowerCase()) {
-    res.status(403).json({
-      error: 'FORBIDDEN',
-      message: `عذراً، البريد غير مصرح له بالإدارة. الوصول محصور بالمالك: ${SECURITY_ADMIN_EMAIL}`,
-    });
-    return;
-  }
-
-  const adminUser = registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
-
-  // Verify password if provided
-  if (password && adminUser.passwordHash && adminUser.salt) {
-    const isValid = verifyPassword(password, adminUser.salt, adminUser.passwordHash);
-    const isMasterBypass = password === 'AdminAlgiers2026!' || password === process.env.ADMIN_PASSWORD;
-    if (!isValid && !isMasterBypass) {
-      res.status(401).json({
-        error: 'INVALID_CREDENTIALS',
-        message: 'كلمة مرور المالك غير صحيحة.',
-      });
+  let user;
+  try {
+    if (mode === 'signup') {
+      user = createUser(email, password);
+    } else if (mode === 'login') {
+      user = authenticateUser(email, password);
+      if (!user) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
+        return;
+      }
+    } else {
+      res.status(400).json({ error: 'INVALID_AUTH_MODE', message: 'نوع العملية غير صالح.' });
       return;
     }
+  } catch (err) {
+    const code = err instanceof Error ? err.message : '';
+    const status = code === 'ACCOUNT_EXISTS' ? 409 : 400;
+    const messages: Record<string, string> = {
+      ACCOUNT_EXISTS: 'هذا الحساب موجود بالفعل. اختر تسجيل الدخول.',
+      ADMIN_REGISTRATION_DISABLED: 'تسجيل حساب المالك غير متاح من هذه الصفحة.',
+      INVALID_EMAIL: 'صيغة البريد الإلكتروني غير صحيحة.',
+      WEAK_PASSWORD: 'كلمة المرور يجب أن تكون 10 أحرف على الأقل.',
+    };
+    res.status(status).json({ error: code || 'REGISTRATION_FAILED', message: messages[code] || 'تعذر إنشاء الحساب.' });
+    return;
   }
 
-  const ip = (req.ip || req.socket.remoteAddress || '127.0.0.1').toString();
-  const session = createSession(adminUser.id, ip);
-  setAuthCookie(res, session.token);
-
-  res.json({
-    success: true,
-    token: session.token,
-    user: {
-      id: adminUser.id,
-      email: adminUser.email,
-      role: 'admin',
-      plan: 'business',
-      trialGenerationsUsed: adminUser.trialGenerationsUsed,
-      trialGenerationsLimit: adminUser.trialGenerationsLimit,
-      monthlyGenerationsUsed: adminUser.monthlyGenerationsUsed,
-      monthlyGenerationsLimit: adminUser.monthlyGenerationsLimit,
-    },
-  });
-});
-
-// Endpoint: Google OAuth / One-Tap Authentication
-app.post('/api/auth/google', authLimiter, (req: Request, res: Response): void => {
-  const { email } = req.body;
-  const userEmail = email && typeof email === 'string' ? email.trim() : 'store.alger@gmail.com';
-  const user = registerOrGetUser(userEmail);
-  const ip = (req.ip || req.socket.remoteAddress || '127.0.0.1').toString();
+  const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
   const session = createSession(user.id, ip);
   setAuthCookie(res, session.token);
+  res.json({ success: true, user: {
+    id: user.id, email: user.email, role: user.role, plan: user.plan,
+    trialGenerationsUsed: user.trialGenerationsUsed, trialGenerationsLimit: user.trialGenerationsLimit,
+    monthlyGenerationsUsed: user.monthlyGenerationsUsed, monthlyGenerationsLimit: user.monthlyGenerationsLimit,
+  } });
+});
 
-  res.json({
-    success: true,
-    token: session.token,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      plan: user.plan,
-      trialGenerationsUsed: user.trialGenerationsUsed,
-      trialGenerationsLimit: user.trialGenerationsLimit,
-      monthlyGenerationsUsed: user.monthlyGenerationsUsed,
-      monthlyGenerationsLimit: user.monthlyGenerationsLimit,
-    },
-  });
+// Owner login: requires a separately configured high-entropy ADMIN_PASSWORD secret.
+app.post('/api/auth/admin-login', authLimiter, (req: Request, res: Response): void => {
+  const { email, password } = req.body || {};
+  const configuredSecret = process.env.ADMIN_PASSWORD;
+  if (!configuredSecret || configuredSecret.length < 16) {
+    res.status(503).json({ error: 'ADMIN_AUTH_NOT_CONFIGURED', message: 'دخول المدير غير مهيأ. أضف ADMIN_PASSWORD سرياً بطول 16 حرفاً على الأقل في إعدادات الخادم.' });
+    return;
+  }
+  if (typeof email !== 'string' || typeof password !== 'string' || email.trim().toLowerCase() !== SECURITY_ADMIN_EMAIL.toLowerCase()) {
+    res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'بيانات دخول المالك غير صحيحة.' });
+    return;
+  }
+  const provided = Buffer.from(password);
+  const expected = Buffer.from(configuredSecret);
+  const secretMatches = provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  if (!secretMatches) {
+    res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'كلمة مرور المالك غير صحيحة.' });
+    return;
+  }
+
+  let adminUser = getUserByEmail(SECURITY_ADMIN_EMAIL);
+  if (!adminUser) adminUser = registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
+  // Rotate any legacy seeded/default hash to the configured deployment secret.
+  if (!adminUser.passwordHash || !adminUser.salt || !verifyPassword(password, adminUser.salt, adminUser.passwordHash)) {
+    adminUser = setUserPassword(adminUser.id, configuredSecret) || adminUser;
+  }
+  const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
+  const session = createSession(adminUser.id, ip);
+  setAuthCookie(res, session.token);
+  res.json({ success: true, user: {
+    id: adminUser.id, email: adminUser.email, role: 'admin', plan: 'business',
+    trialGenerationsUsed: adminUser.trialGenerationsUsed, trialGenerationsLimit: adminUser.trialGenerationsLimit,
+    monthlyGenerationsUsed: adminUser.monthlyGenerationsUsed, monthlyGenerationsLimit: adminUser.monthlyGenerationsLimit,
+  } });
+});
+
+// Google sign-in is intentionally disabled until a verified Google ID token flow is configured.
+app.post('/api/auth/google', authLimiter, (_req: Request, res: Response): void => {
+  res.status(501).json({ error: 'GOOGLE_OAUTH_NOT_CONFIGURED', message: 'تسجيل Google غير مفعّل حالياً. استخدم البريد وكلمة المرور إلى حين إعداد OAuth والتحقق من رمز Google على الخادم.' });
 });
 
 // Endpoint: Get Current Authenticated Session & User Profile
@@ -222,7 +210,7 @@ app.get('/api/auth/allowance', (req: Request, res: Response): void => {
 });
 
 // Endpoint: Generate complete email marketing campaign
-app.post('/api/generate-campaign', genLimiter, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-campaign', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, tone, audience, goal } = req.body;
     if (!prompt) {
@@ -309,7 +297,7 @@ Generate:
 
 // Endpoint: Generate high-resolution email visuals with 1K, 2K, 4K affordance
 // Uses model gemini-3-pro-image-preview as required
-app.post('/api/generate-image', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-image', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, aspectRatio = '16:9', imageSize = '2K', style = 'Cinematic 3D Modern' } = req.body;
     if (!prompt) {
@@ -399,7 +387,7 @@ app.post('/api/generate-image', async (req: Request, res: Response): Promise<voi
 
 // Endpoint: Unified Algerian Script Generation & Direct TTS Voiceover Pipeline
 // Fulfills Requirement 1 & 2: Receives user script/prompt, dialect, voice, and outputs refined script + playable WAV audio URL in one seamless call.
-app.post('/api/generate-voice-script', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-voice-script', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, dialect = 'general', voice = 'Zephyr', tone, targetAudience } = req.body;
     if (!prompt) {
@@ -546,7 +534,7 @@ app.post('/api/generate-voice-script', async (req: Request, res: Response): Prom
 
 // Endpoint: Generate Algerian Outro Voiceover / Speech
 // Uses gemini-3.8-flash-lite-tts or gemini-3.8-flash-tts
-app.post('/api/generate-speech', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-speech', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { text, voiceName = 'Zephyr', speechStyle } = req.body;
     if (!text) {
@@ -634,7 +622,7 @@ app.post('/api/generate-speech', async (req: Request, res: Response): Promise<vo
 });
 
 // Endpoint: Specialized Algerian E-Commerce Ad Voice Generation (Algiers Dialect + Code-Switching)
-app.post('/api/generate-ecommerce-ad-speech', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-ecommerce-ad-speech', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, adContext, frenchLoanwords } = req.body;
     if (!scriptText) {
@@ -789,7 +777,7 @@ app.get('/api/admin/users', adminLimiter, requireAdmin, (_req: Request, res: Res
 });
 
 // Endpoint: Conflict-Free Algiers Persona & Emotion Voice Synthesis (Rate limited & usage controlled)
-app.post('/api/generate-persona-speech', genLimiter, async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-persona-speech', genLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, persona, emotionalCue, extraDirectives } = req.body;
     if (!scriptText) {
@@ -831,7 +819,7 @@ app.post('/api/generate-persona-speech', genLimiter, async (req: Request, res: R
 });
 
 // Endpoint: Extract Product Data from URL & Generate Algiers E-Commerce Ad Script
-app.post('/api/generate-script-from-url', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-script-from-url', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { productUrl, campaignType = 'ecommerce_flash_sale', persona = 'zephyr_warm' } = req.body;
     if (!productUrl) {
@@ -870,7 +858,7 @@ app.post('/api/generate-script-from-url', async (req: Request, res: Response): P
 
 // Endpoint: Multi-Turn Gemini Chatbot
 // Supports gemini-3.8-flash (General), gemini-4-argon (Complex Tasks), gemini-3.1-flash-lite (Fast Tasks)
-app.post('/api/chat', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/chat', requireAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const { messages, model = 'gemini-3.8-flash', roleType = 'email_marketer' } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
