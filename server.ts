@@ -2,15 +2,11 @@ import express from 'express';
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
-import { verifyDatabaseConnection, closeDatabasePool } from './src/server/database';
+import { verifyDatabaseConnection } from './src/server/database';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
 import {
-  initializeAuthStore,
   authMiddleware,
   requireAuth,
   requireAdmin,
@@ -31,13 +27,7 @@ import {
   ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
 } from './src/server/security';
 
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+export const app = express();
 
 app.use(express.json({ limit: '1mb' }));
 app.use('/api', (_req: Request, res: Response, next) => {
@@ -1216,48 +1206,4 @@ With this new solution, you eliminate tedious guesswork and move straight to hig
   };
 }
 
-// Mount Vite or serve static assets
-async function startServer() {
-  await initializeAuthStore();
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-    });
-  }
-
-  const httpServer = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`MailCraft AI server running on port ${PORT}`);
-  });
-
-  let shuttingDown = false;
-  const shutdown = (signal: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    console.log(`Received ${signal}; shutting down gracefully.`);
-    httpServer.close(async (error) => {
-      if (error) console.error('HTTP server shutdown error:', error);
-      try {
-        await closeDatabasePool();
-      } catch (dbError) {
-        console.error('Database pool shutdown error:', dbError);
-      } finally {
-        process.exit(error ? 1 : 0);
-      }
-    });
-  };
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
-  process.once('SIGINT', () => shutdown('SIGINT'));
-}
-
-startServer().catch((err) => {
-  console.error('Fatal server startup error:', err);
-  process.exit(1);
-});
+// Express application is exported for the local Node bootstrap and Cloudflare Worker adapter.
