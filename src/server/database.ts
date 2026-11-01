@@ -3,6 +3,7 @@ import { Client, Pool } from 'pg';
 
 interface WorkerDatabaseContext {
   connectionString: string;
+  env?: Record<string, string | undefined>;
   client?: Client;
   connected?: Promise<void>;
 }
@@ -27,9 +28,10 @@ let localPool: Pool | undefined;
 export function runWithDatabaseConnectionString<T>(
   connectionString: string,
   callback: () => T,
+  env?: Record<string, string | undefined>,
 ): T {
   if (!connectionString) throw new Error('HYPERDRIVE connectionString is required');
-  return workerDatabaseContext.run({ connectionString }, callback);
+  return workerDatabaseContext.run({ connectionString, env }, callback);
 }
 
 function getWorkerDatabaseAdapter(context: WorkerDatabaseContext): DatabaseAdapter {
@@ -60,6 +62,11 @@ function getWorkerDatabaseAdapter(context: WorkerDatabaseContext): DatabaseAdapt
       };
     },
   };
+}
+
+export function getRequestEnvironmentValue(name: string): string | undefined {
+  const workerContext = workerDatabaseContext.getStore();
+  return workerContext?.env?.[name] ?? process.env[name];
 }
 
 export function getDatabasePool(): DatabaseAdapter {
