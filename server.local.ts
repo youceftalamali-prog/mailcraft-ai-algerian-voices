@@ -2,7 +2,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { app } from './server';
-import { initializeAuthStore, closeDatabasePool } from './src/server/security';
+import { initializeAuthStore } from './src/server/security';
+import { closeDatabasePool } from './src/server/database';
 
 dotenv.config();
 
