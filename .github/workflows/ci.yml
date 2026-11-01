@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, "fix/security-hardening-*"]
+    branches: [main, "fix/security-hardening-*", "feat/cloudflare-workers-deployment"]
 
 jobs:
   verify:
@@ -24,5 +24,7 @@ jobs:
         run: npm test
       - name: Production build
         run: npm run build
+      - name: Validate Cloudflare Worker bundle
+        run: npm run build:worker
       - name: Build Cloud Run container
         run: docker build --tag mailcraft-ai:ci .
