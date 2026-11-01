@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
-import { verifyDatabaseConnection } from './src/server/database';
+import { getRequestEnvironmentValue, verifyDatabaseConnection } from './src/server/database';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
@@ -57,14 +57,13 @@ const adminLimiter = rateLimiter({
 });
 
 // Shared server-side Gemini client with required User-Agent
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
+function createGeminiClient(apiKey = getRequestEnvironmentValue('GEMINI_API_KEY')): GoogleGenAI {
+  if (!apiKey) throw new Error('GEMINI_API_KEY is required');
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+}
 
 // Health-check endpoint
 app.get('/api/health', async (_req: Request, res: Response): Promise<void> => {
@@ -133,7 +132,7 @@ app.post('/api/auth/login', authLimiter, async (req: Request, res: Response): Pr
 // Owner login: requires a separately configured high-entropy ADMIN_PASSWORD secret.
 app.post('/api/auth/admin-login', authLimiter, async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body || {};
-  const configuredSecret = process.env.ADMIN_PASSWORD;
+  const configuredSecret = getRequestEnvironmentValue('ADMIN_PASSWORD');
   if (!configuredSecret || configuredSecret.length < 16) {
     res.status(503).json({ error: 'ADMIN_AUTH_NOT_CONFIGURED', message: 'دخول المدير غير مهيأ. أضف ADMIN_PASSWORD سرياً بطول 16 حرفاً على الأقل في إعدادات الخادم.' });
     return;
@@ -239,7 +238,7 @@ Generate:
 
     for (const m of modelsToTry) {
       try {
-        const response = await ai.models.generateContent({
+        const response = await createGeminiClient().models.generateContent({
           model: m,
           contents: userPrompt,
           config: {
@@ -637,7 +636,7 @@ app.post('/api/generate-ecommerce-ad-speech', genLimiter, requireAuth, consumeGe
       productName: adContext?.productName,
     };
 
-    const result = await generateEcommerceAdSpeech(ai, {
+    const result = await generateEcommerceAdSpeech(createGeminiClient(), {
       scriptText,
       adContext: defaultContext,
       frenchLoanwords: frenchLoanwords || [],
@@ -677,7 +676,7 @@ app.post('/api/admin/verify-api-key', adminLimiter, requireAdmin, async (req: Re
           apiKey: apiKey.trim(),
           httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
         })
-      : ai;
+      : createGeminiClient();
 
     const candidateModels = [model || 'gemini-3.8-flash', 'gemini-3.1-flash-lite'];
     let lastError: Error | null = null;
@@ -784,7 +783,7 @@ app.post('/api/generate-persona-speech', genLimiter, requireAuth, consumeGenerat
       return;
     }
 
-    const result = await generatePersonaSpeech(ai, {
+    const result = await generatePersonaSpeech(createGeminiClient(), {
       scriptText,
       persona: persona || 'zephyr_warm',
       emotionalCue,
@@ -815,7 +814,7 @@ app.post('/api/generate-script-from-url', genLimiter, requireAuth, consumeGenera
 
     // 2. Generate Algiers E-Commerce Script using Gemini
     const { script, suggestedEmotion, loanwords } = await generateAdScriptFromProduct(
-      ai,
+      createGeminiClient(),
       extractedProduct,
       campaignType,
       persona
