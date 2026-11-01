@@ -9,6 +9,8 @@ interface WorkerAssets {
 interface WorkerEnv {
   ASSETS: WorkerAssets;
   HYPERDRIVE?: { connectionString: string };
+  GEMINI_API_KEY?: string;
+  ADMIN_PASSWORD?: string;
 }
 
 // Cloudflare's Node HTTP integration preserves the existing Express routes.
@@ -31,6 +33,7 @@ export default {
       return runWithDatabaseConnectionString(
         env.HYPERDRIVE.connectionString,
         () => expressHandler(request),
+        { GEMINI_API_KEY: env.GEMINI_API_KEY, ADMIN_PASSWORD: env.ADMIN_PASSWORD },
       );
     }
 
