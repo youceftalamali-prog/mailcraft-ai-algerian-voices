@@ -10,6 +10,7 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package*.json ./
+COPY scripts ./scripts
 RUN npm install --omit=dev --legacy-peer-deps && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server.ts ./server.ts
