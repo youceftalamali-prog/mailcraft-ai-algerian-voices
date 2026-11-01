@@ -2,7 +2,11 @@ import express from 'express';
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
-import { getRequestEnvironmentValue, verifyDatabaseConnection } from './src/server/database';
+import {
+  getRequestEnvironmentValue,
+  runWithRegisteredWorkerDatabaseContext,
+  verifyDatabaseConnection,
+} from './src/server/database';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
@@ -28,6 +32,19 @@ import {
 } from './src/server/security';
 
 export const app = express();
+
+// Re-enter the correct request-scoped database context after Cloudflare's
+// Node HTTP bridge dispatches the request to this Express server.
+app.use((req: Request, _res: Response, next) => {
+  const requestId = req.headers['x-internal-worker-db-context'];
+  if (typeof requestId !== 'string') {
+    next();
+    return;
+  }
+  if (!runWithRegisteredWorkerDatabaseContext(requestId, next)) {
+    next(new Error('Worker database request context was not found.'));
+  }
+});
 
 // Parse JSON without body-parser/raw-body/iconv-lite. The latter currently fails
 // during Worker startup in the Cloudflare Node compatibility runtime.
