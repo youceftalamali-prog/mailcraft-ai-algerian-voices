@@ -331,7 +331,7 @@ app.post('/api/generate-image', genLimiter, requireAuth, consumeGenerationAllowa
             : '2K';
         }
 
-        const imageResponse = await ai.models.generateContent({
+        const imageResponse = await createGeminiClient().models.generateContent({
           model: modelName,
           contents: {
             parts: [{ text: enhancedPrompt }],
@@ -436,7 +436,7 @@ app.post('/api/generate-voice-script', genLimiter, requireAuth, consumeGeneratio
 
     for (const m of textModels) {
       try {
-        const textResponse = await ai.models.generateContent({
+        const textResponse = await createGeminiClient().models.generateContent({
           model: m,
           contents: userMessage,
           config: {
@@ -466,7 +466,7 @@ app.post('/api/generate-voice-script', genLimiter, requireAuth, consumeGeneratio
 
     for (const ttsModel of ttsModels) {
       try {
-        const ttsResponse = await ai.models.generateContent({
+        const ttsResponse = await createGeminiClient().models.generateContent({
           model: ttsModel,
           contents: [
             {
@@ -548,7 +548,7 @@ app.post('/api/generate-speech', genLimiter, requireAuth, consumeGenerationAllow
 
     for (const ttsModel of ttsModels) {
       try {
-        const ttsResponse = await ai.models.generateContent({
+        const ttsResponse = await createGeminiClient().models.generateContent({
           model: ttsModel,
           contents: [
             {
@@ -882,7 +882,7 @@ Provide clear, structured, actionable advice with concrete examples and copy rev
       ? model
       : 'gemini-3.8-flash';
 
-    const response = await ai.models.generateContent({
+    const response = await createGeminiClient().models.generateContent({
       model: targetModel,
       contents,
       config: {
