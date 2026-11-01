@@ -25,34 +25,13 @@ let localPool: Pool | undefined;
  * Bind one Hyperdrive connection string to the lifetime of a single Worker
  * request. The Client is created lazily and is never shared between requests.
  */
-export async function runWithDatabaseConnectionString<T>(
+export function runWithDatabaseConnectionString<T>(
   connectionString: string,
-  callback: () => T | Promise<T>,
+  callback: () => T,
   env?: Record<string, string | undefined>,
-): Promise<Awaited<T>> {
+): T {
   if (!connectionString) throw new Error('HYPERDRIVE connectionString is required');
-  const context: WorkerDatabaseContext = { connectionString, env };
-
-  return workerDatabaseContext.run(context, async () => {
-    try {
-      return await callback();
-    } finally {
-      // Hyperdrive connections are request-scoped here. Wait for an in-flight
-      // connection attempt, then always close the pg Client when the complete
-      // Express response has finished (including async route handlers).
-      if (context.client) {
-        try {
-          await context.connected?.catch(() => undefined);
-          await context.client.end();
-        } catch (error) {
-          console.error('Failed to close request-scoped Hyperdrive client:', error);
-        } finally {
-          context.client = undefined;
-          context.connected = undefined;
-        }
-      }
-    }
-  });
+  return workerDatabaseContext.run({ connectionString, env }, callback);
 }
 
 function getWorkerDatabaseAdapter(context: WorkerDatabaseContext): DatabaseAdapter {
