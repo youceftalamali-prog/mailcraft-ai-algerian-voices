@@ -1,17 +1,23 @@
 diff --git a/node_modules/express/lib/express.js b/node_modules/express/lib/express.js
-index 0000000..0000000 100644
+index 1111111..2222222 100644
 --- a/node_modules/express/lib/express.js
 +++ b/node_modules/express/lib/express.js
-@@ -9,7 +9,6 @@
+@@ -12,8 +12,7 @@
+ 'use strict';
+
+ /**
+  * Module dependencies.
+  */
+
 -var bodyParser = require('body-parser')
  var EventEmitter = require('events').EventEmitter;
  var mixin = require('merge-descriptors');
  var proto = require('./application');
-@@ -68,10 +67,6 @@ exports.Router = Router;
+@@ -69,12 +68,8 @@ exports.Router = Router;
  /**
   * Expose middleware
   */
--
+
 -exports.json = bodyParser.json
  exports.query = require('./middleware/query');
 -exports.raw = bodyParser.raw
