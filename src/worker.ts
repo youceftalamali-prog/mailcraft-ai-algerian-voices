@@ -1,6 +1,9 @@
 import { httpServerHandler } from 'cloudflare:node';
 import { app } from '../server';
-import { runWithDatabaseConnectionString } from './server/database';
+import {
+  registerWorkerDatabaseContext,
+  releaseWorkerDatabaseContext,
+} from './server/database';
 
 interface WorkerAssets {
   fetch(request: Request): Promise<Response>;
@@ -30,14 +33,30 @@ export default {
           { status: 503 },
         ));
       }
-      return runWithDatabaseConnectionString(
+      const requestId = crypto.randomUUID();
+      registerWorkerDatabaseContext(
+        requestId,
         env.HYPERDRIVE.connectionString,
-        () => expressHandler(request),
         { GEMINI_API_KEY: env.GEMINI_API_KEY, ADMIN_PASSWORD: env.ADMIN_PASSWORD },
-      ).catch((error: unknown) => {
-        console.error('Worker API request failed:', error);
-        return Response.json({ error: 'INTERNAL_SERVER_ERROR' }, { status: 500 });
-      });
+      );
+
+      const headers = new Headers(request.headers);
+      headers.set('x-internal-worker-db-context', requestId);
+      const bridgedRequest = new Request(request, { headers });
+
+      return (async (): Promise<Response> => {
+        try {
+          return await expressHandler(bridgedRequest);
+        } catch (error: unknown) {
+          const diagnostic = error instanceof Error
+            ? { name: error.name, message: error.message }
+            : { type: typeof error };
+          console.error('Worker API request failed:', diagnostic);
+          return Response.json({ error: 'INTERNAL_SERVER_ERROR' }, { status: 500 });
+        } finally {
+          await releaseWorkerDatabaseContext(requestId);
+        }
+      })();
     }
 
     return env.ASSETS.fetch(request);
