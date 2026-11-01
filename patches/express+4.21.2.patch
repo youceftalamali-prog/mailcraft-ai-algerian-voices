@@ -1,0 +1,22 @@
+diff --git a/node_modules/express/lib/express.js b/node_modules/express/lib/express.js
+--- a/node_modules/express/lib/express.js
++++ b/node_modules/express/lib/express.js
+@@ -9,7 +9,6 @@
+-var bodyParser = require('body-parser')
+ var EventEmitter = require('events').EventEmitter;
+ var mixin = require('merge-descriptors');
+ var proto = require('./application');
+@@ -68,10 +67,6 @@ exports.Router = Router;
+ /**
+  * Expose middleware
+  */
+-
+-exports.json = bodyParser.json
+ exports.query = require('./middleware/query');
+-exports.raw = bodyParser.raw
+ exports.static = require('serve-static');
+-exports.text = bodyParser.text
+-exports.urlencoded = bodyParser.urlencoded
+ 
+ /**
+  * Replace removed middleware with an appropriate error message.
