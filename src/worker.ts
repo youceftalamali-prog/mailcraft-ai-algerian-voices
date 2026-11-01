@@ -1,6 +1,6 @@
 import { httpServerHandler } from 'cloudflare:node';
-import type { RequestHandler } from 'express';
 import { app } from '../server';
+import { runWithDatabaseConnectionString } from './server/database';
 
 interface WorkerAssets {
   fetch(request: Request): Promise<Response>;
@@ -8,6 +8,7 @@ interface WorkerAssets {
 
 interface WorkerEnv {
   ASSETS: WorkerAssets;
+  HYPERDRIVE?: { connectionString: string };
 }
 
 // Cloudflare's Node HTTP integration preserves the existing Express routes.
@@ -21,7 +22,16 @@ export default {
 
     // Keep API traffic on Express; serve the Vite SPA through the Assets binding.
     if (pathname === '/api' || pathname.startsWith('/api/')) {
-      return expressHandler(request);
+      if (!env.HYPERDRIVE?.connectionString) {
+        return Promise.resolve(Response.json(
+          { error: 'DATABASE_NOT_CONFIGURED', message: 'Hyperdrive is not configured for this Worker.' },
+          { status: 503 },
+        ));
+      }
+      return runWithDatabaseConnectionString(
+        env.HYPERDRIVE.connectionString,
+        () => expressHandler(request),
+      );
     }
 
     return env.ASSETS.fetch(request);
