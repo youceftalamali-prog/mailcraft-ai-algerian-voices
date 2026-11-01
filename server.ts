@@ -33,7 +33,7 @@ export const app = express();
 // during Worker startup in the Cloudflare Node compatibility runtime.
 app.use(async (req: Request, res: Response, next) => {
   const contentType = req.headers['content-type'] || '';
-  if (!/^application\/(?:[\\w.+-]+\\+)?json(?:\\s*;|$)/i.test(contentType)) {
+  if (!/^application\/(?:[\w.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) {
     next();
     return;
   }
