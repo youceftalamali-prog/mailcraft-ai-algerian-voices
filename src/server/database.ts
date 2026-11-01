@@ -44,7 +44,7 @@ function getWorkerDatabaseAdapter(context: WorkerDatabaseContext): DatabaseAdapt
 
   const query = (async (...args: Parameters<QueryFunction>) => {
     const client = await getClient();
-    return client.query(...(args as [any])) as ReturnType<QueryFunction>;
+    return (client.query as (...queryArgs: any[]) => ReturnType<QueryFunction>)(...args);
   }) as QueryFunction;
 
   return {
@@ -53,7 +53,7 @@ function getWorkerDatabaseAdapter(context: WorkerDatabaseContext): DatabaseAdapt
       const client = await getClient();
       return {
         query: ((...args: Parameters<QueryFunction>) =>
-          client.query(...(args as [any]))) as QueryFunction,
+          (client.query as (...queryArgs: any[]) => ReturnType<QueryFunction>)(...args)) as QueryFunction,
         // The request-scoped Client is owned by the Worker invocation. Do not
         // close it here: other queries in the same request may still use it.
         release() {},
