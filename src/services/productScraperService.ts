@@ -1,6 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
 import * as cheerio from 'cheerio';
-import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { AlgiersPersonaId } from './algerianPersonaVoiceService';
 
@@ -70,9 +69,13 @@ export async function assertPublicHttpUrl(value: string): Promise<URL> {
   if (isIP(hostname)) {
     if (isPrivateAddress(hostname)) throw new Error('لا يمكن جلب عنوان شبكة خاص أو داخلي.');
   } else {
-    const records = await lookup(hostname, { all: true, verbatim: true });
-    if (!records.length || records.some((record) => isPrivateAddress(record.address))) {
-      throw new Error('عنوان الموقع غير عام أو غير آمن للجلب.');
+    // Cloudflare Workers does not expose DNS resolution APIs. For hostnames,
+    // outbound fetch is performed by the Workers network; manual redirects
+    // ensure every redirect target is re-validated before the next request.
+    if (!/^[a-z0-9.-]+$/.test(hostname) || hostname.startsWith('.') ||
+        hostname.endsWith('.') || hostname.includes('..') ||
+        hostname === 'metadata.google.internal' || hostname.endsWith('.internal')) {
+      throw new Error('اسم الموقع غير صالح أو غير آمن للجلب.');
     }
   }
   return url;
