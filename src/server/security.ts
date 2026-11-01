@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
-import { getDatabasePool } from './database';
+import { getDatabasePool, getRequestEnvironmentValue } from './database';
 
 export const ADMIN_EMAIL = 'Youceftalamali@gmail.com';
 
@@ -133,8 +133,9 @@ export async function registerOrGetUser(email: string, role: 'admin' | 'user' = 
   const existing = await getUserByEmail(clean);
   if (existing) return existing;
   const admin = clean === ADMIN_EMAIL.toLowerCase();
-  const salt = admin && process.env.ADMIN_PASSWORD ? crypto.randomBytes(16).toString('hex') : null;
-  const hash = salt ? hashPassword(process.env.ADMIN_PASSWORD!, salt) : null;
+  const adminPassword = getRequestEnvironmentValue('ADMIN_PASSWORD');
+  const salt = admin && adminPassword ? crypto.randomBytes(16).toString('hex') : null;
+  const hash = salt ? hashPassword(adminPassword!, salt) : null;
   const id = (admin ? 'admin-' : 'user-') + crypto.randomBytes(12).toString('hex');
   try {
     const r = await getDatabasePool().query(`INSERT INTO app_users
