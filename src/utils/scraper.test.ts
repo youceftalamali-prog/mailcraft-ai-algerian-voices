@@ -70,3 +70,14 @@ test('product scraper blocks loopback, private, and reserved network addresses',
   await assert.rejects(assertPublicHttpUrl('http://127.0.0.1/admin'));
   await assert.rejects(assertPublicHttpUrl('http://localhost/'));
 });
+
+test('product scraper rejects reserved documentation and multicast IPv6 ranges', () => {
+  for (const address of ['0.0.0.0', '224.0.0.1', '198.51.100.1', '203.0.113.9', 'fc00::1', 'fe80::1', 'ff02::1']) {
+    assert.equal(isPrivateAddress(address), true, `Must block ${address}`);
+  }
+});
+
+test('product scraper rejects malformed and internal hostnames without DNS resolution', async () => {
+  await assert.rejects(assertPublicHttpUrl('https://metadata.google.internal/computeMetadata/v1'));
+  await assert.rejects(assertPublicHttpUrl('https://bad..hostname.example/product'));
+});
