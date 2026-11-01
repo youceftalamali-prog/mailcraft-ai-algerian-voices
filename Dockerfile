@@ -13,6 +13,7 @@ COPY package*.json ./
 RUN npm install --omit=dev --legacy-peer-deps && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server.ts ./server.ts
+COPY --from=build /app/server.local.ts ./server.local.ts
 COPY --from=build /app/src ./src
 EXPOSE 8080
-CMD ["node", "--import", "tsx", "server.ts"]
+CMD ["node", "--import", "tsx", "server.local.ts"]
