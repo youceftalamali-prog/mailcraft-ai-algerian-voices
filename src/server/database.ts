@@ -48,13 +48,14 @@ export function registerWorkerDatabaseContext(
   workerRequestContexts.set(requestId, { connectionString, env });
 }
 
-export function runWithRegisteredWorkerDatabaseContext<T>(
+export function runWithRegisteredWorkerDatabaseContext(
   requestId: string,
-  callback: () => T,
-): T | undefined {
+  callback: () => void,
+): boolean {
   const context = workerRequestContexts.get(requestId);
-  if (!context) return undefined;
-  return workerDatabaseContext.run(context, callback);
+  if (!context) return false;
+  workerDatabaseContext.run(context, callback);
+  return true;
 }
 
 export async function releaseWorkerDatabaseContext(requestId: string): Promise<void> {
