@@ -19,6 +19,7 @@ interface DatabaseAdapter {
 }
 
 const workerDatabaseContext = new AsyncLocalStorage<WorkerDatabaseContext>();
+const workerRequestContexts = new Map<string, WorkerDatabaseContext>();
 let localPool: Pool | undefined;
 
 /**
@@ -32,6 +33,40 @@ export function runWithDatabaseConnectionString<T>(
 ): T {
   if (!connectionString) throw new Error('HYPERDRIVE connectionString is required');
   return workerDatabaseContext.run({ connectionString, env }, callback);
+}
+
+/**
+ * Restore the request context inside Express after the Cloudflare Node HTTP
+ * bridge dispatches the request on its own asynchronous execution path.
+ */
+export function registerWorkerDatabaseContext(
+  requestId: string,
+  connectionString: string,
+  env?: Record<string, string | undefined>,
+): void {
+  if (!requestId || !connectionString) throw new Error('Worker database request context is incomplete');
+  workerRequestContexts.set(requestId, { connectionString, env });
+}
+
+export function runWithRegisteredWorkerDatabaseContext<T>(
+  requestId: string,
+  callback: () => T,
+): T | undefined {
+  const context = workerRequestContexts.get(requestId);
+  if (!context) return undefined;
+  return workerDatabaseContext.run(context, callback);
+}
+
+export async function releaseWorkerDatabaseContext(requestId: string): Promise<void> {
+  const context = workerRequestContexts.get(requestId);
+  workerRequestContexts.delete(requestId);
+  if (context?.client) {
+    try {
+      await context.client.end();
+    } catch (error) {
+      console.error('Failed to close request-scoped database client:', error instanceof Error ? error.name : 'unknown');
+    }
+  }
 }
 
 function getWorkerDatabaseAdapter(context: WorkerDatabaseContext): DatabaseAdapter {
