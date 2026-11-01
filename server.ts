@@ -29,7 +29,56 @@ import {
 
 export const app = express();
 
-app.use(express.json({ limit: '1mb' }));
+// Parse JSON without body-parser/raw-body/iconv-lite. The latter currently fails
+// during Worker startup in the Cloudflare Node compatibility runtime.
+app.use(async (req: Request, res: Response, next) => {
+  const contentType = req.headers['content-type'] || '';
+  if (!/^application\/(?:[\\w.+-]+\\+)?json(?:\\s*;|$)/i.test(contentType)) {
+    next();
+    return;
+  }
+
+  const declaredLength = Number(req.headers['content-length']);
+  if (Number.isFinite(declaredLength) && declaredLength > 1024 * 1024) {
+    res.status(413).json({ error: 'REQUEST_TOO_LARGE', message: 'JSON request body exceeds the 1 MB limit.' });
+    return;
+  }
+
+  try {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    for await (const chunk of req) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.byteLength;
+      if (totalBytes > 1024 * 1024) {
+        res.status(413).json({ error: 'REQUEST_TOO_LARGE', message: 'JSON request body exceeds the 1 MB limit.' });
+        return;
+      }
+      chunks.push(buffer);
+    }
+
+    if (totalBytes === 0) {
+      req.body = {};
+      next();
+      return;
+    }
+
+    const jsonText = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
+    const parsedBody: unknown = JSON.parse(jsonText);
+    if (parsedBody === null || typeof parsedBody !== 'object') {
+      res.status(400).json({ error: 'INVALID_JSON', message: 'JSON request body must be an object or array.' });
+      return;
+    }
+    req.body = parsedBody;
+    next();
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof TypeError) {
+      res.status(400).json({ error: 'INVALID_JSON', message: 'Request body must contain valid UTF-8 JSON.' });
+      return;
+    }
+    next(error);
+  }
+});
 app.use('/api', (_req: Request, res: Response, next) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
