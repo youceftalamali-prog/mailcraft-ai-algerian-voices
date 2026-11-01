@@ -36,7 +36,7 @@ function getWorkerDatabaseAdapter(context: WorkerDatabaseContext): DatabaseAdapt
   const getClient = async (): Promise<Client> => {
     if (!context.client) {
       context.client = new Client({ connectionString: context.connectionString });
-      context.connected = context.client.connect();
+      context.connected = context.client.connect().then(() => undefined);
     }
     await context.connected;
     return context.client;
