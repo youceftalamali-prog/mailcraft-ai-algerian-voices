@@ -2,6 +2,7 @@
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
+COPY scripts ./scripts
 RUN npm install --legacy-peer-deps
 COPY . .
 RUN npm run lint && npm test && npm run build
