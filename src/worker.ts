@@ -34,7 +34,10 @@ export default {
         env.HYPERDRIVE.connectionString,
         () => expressHandler(request),
         { GEMINI_API_KEY: env.GEMINI_API_KEY, ADMIN_PASSWORD: env.ADMIN_PASSWORD },
-      );
+      ).catch((error: unknown) => {
+        console.error('Worker API request failed:', error);
+        return Response.json({ error: 'INTERNAL_SERVER_ERROR' }, { status: 500 });
+      });
     }
 
     return env.ASSETS.fetch(request);
