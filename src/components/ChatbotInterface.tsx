@@ -13,6 +13,8 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
+type ChatResponse = { reply?: string };
+
 interface ChatbotInterfaceProps {
   onInsertToCampaign?: (text: string) => void;
 }
@@ -84,7 +86,7 @@ How can I help you today?
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as ChatResponse;
       const reply = data.reply || 'I could not generate a response. Please try again.';
 
       setMessages((prev) => [
