@@ -18,6 +18,11 @@ import {
 } from './services/adminStore';
 import { Sparkles, AlertCircle, Wand2, Mic, MessageSquare, ShieldCheck, Lock, ShieldAlert, KeyRound, Crown, ArrowRight, CheckCircle2 } from 'lucide-react';
 
+type SessionUser = { email: string; role: 'admin' | 'user' };
+type SessionResponse = { authenticated: boolean; user?: SessionUser | null };
+type AuthResponse = { success?: boolean; user?: SessionUser; message?: string };
+type ImageGenerationResponse = { imageUrl?: string };
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('landing');
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(() => {
@@ -38,7 +43,7 @@ export default function App() {
   // Synchronize server-side session on mount
   React.useEffect(() => {
     fetch('/api/auth/me')
-      .then((res) => res.json())
+      .then((res) => res.json() as Promise<SessionResponse>)
       .then((data) => {
         if (data.authenticated && data.user) {
           setCurrentUserEmail(data.user.email);
@@ -78,7 +83,7 @@ export default function App() {
   const handleUserLogin = async (email: string) => {
     try {
       const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
-      const data = await res.json();
+      const data = await res.json() as SessionResponse;
       if (res.ok && data.authenticated && data.user && data.user.email.toLowerCase() === email.trim().toLowerCase()) {
         setCurrentUserEmail(data.user.email);
         setCurrentUserRole(data.user.role);
@@ -132,7 +137,7 @@ export default function App() {
           password: adminLoginFormPassword.trim(),
         }),
       });
-      const data = await res.json();
+      const data = await res.json() as AuthResponse;
       if (data.success && data.user) {
         setAdminLoginError(null);
         setCurrentUserEmail(data.user.email);
@@ -220,7 +225,7 @@ export default function App() {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as ImageGenerationResponse;
       if (data.imageUrl) {
         setCampaign((prev) => ({
           ...prev,
