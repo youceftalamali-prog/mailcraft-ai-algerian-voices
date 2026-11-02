@@ -262,7 +262,7 @@ export default function App() {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as ImageGenerationResponse;
       if (data.imageUrl) {
         setCampaign((prev) => ({
           ...prev,
