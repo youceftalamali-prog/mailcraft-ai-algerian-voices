@@ -7,6 +7,8 @@ interface ShopifyProductResponse {
   product?: {
     title?: string;
     body_html?: string;
+    product_type?: string;
+    tags?: string[];
     vendor?: string;
     variants?: Array<{ price?: string }>;
     image?: { src?: string };
