@@ -49,3 +49,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Smoke-test deployed Worker diagnostics
+        shell: bash
+        run: |
+          set +e
+          for endpoint in /api/health/runtime /api/health; do
+            echo "===== GET ${endpoint} ====="
+            curl --silent --show-error --max-time 30 --include "https://mailcraft-ai.youceftalamali.workers.dev${endpoint}"
+            echo
+          done
