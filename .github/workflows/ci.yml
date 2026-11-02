@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, "feat/cloudflare-workers-deployment"]
+    branches: [main, "feat/cloudflare-workers-deployment", "grok/full-project-repair"]
   push:
     branches: [main, "fix/security-hardening-*", "feat/cloudflare-workers-deployment", "grok/full-project-repair", "fix/auth-*"]
 
