@@ -262,7 +262,12 @@ app.post('/api/auth/admin-login', authLimiter, async (req: Request, res: Respons
   if (!adminUser) adminUser = await registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
   // The owner email alone never grants admin rights. After the deployment secret
   // has been verified above, enforce the canonical owner role on legacy rows.
-  adminUser = (await updateUser(adminUser.id, { role: 'admin', plan: 'business' })) || adminUser;
+  const promotedAdmin = await updateUser(adminUser.id, { role: 'admin', plan: 'business' });
+  if (!promotedAdmin) {
+    res.status(500).json({ error: 'ADMIN_ACCOUNT_UPDATE_FAILED', message: 'تعذر تحديث صلاحيات حساب المالك.' });
+    return;
+  }
+  adminUser = promotedAdmin;
   // Rotate any legacy seeded/default hash to the configured deployment secret.
   if (!adminUser.passwordHash || !adminUser.salt || !verifyPassword(password, adminUser.salt, adminUser.passwordHash)) {
     adminUser = (await setUserPassword(adminUser.id, configuredSecret)) || adminUser;
