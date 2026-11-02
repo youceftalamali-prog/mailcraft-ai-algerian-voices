@@ -240,7 +240,7 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch((): ApiErrorResponse => ({}));
+        const errorData = await res.json().catch(() => ({})) as ApiErrorResponse;
         throw new Error(errorData.error || `خطأ أثناء استخراج تفاصيل المنتج (${res.status})`);
       }
 
