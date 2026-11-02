@@ -27,12 +27,35 @@ export default function App() {
       return null;
     }
   });
+  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'user' | null>(null);
   const [adminLoginFormEmail, setAdminLoginFormEmail] = useState(ADMIN_EMAIL);
   const [adminLoginFormPassword, setAdminLoginFormPassword] = useState('');
   const [adminLoginError, setAdminLoginError] = useState<string | null>(null);
   const [showcaseSamples, setShowcaseSamples] = useState<ShowcaseAudioSample[]>(() =>
     loadAdminShowcaseSamples()
   );
+
+  // Synchronize server-side session on mount
+  React.useEffect(() => {
+    fetch('/api/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.authenticated && data.user) {
+          setCurrentUserEmail(data.user.email);
+          setCurrentUserRole(data.user.role);
+          try {
+            localStorage.setItem('dz_user_email', data.user.email);
+          } catch {}
+        } else {
+          setCurrentUserEmail(null);
+          setCurrentUserRole(null);
+          try {
+            localStorage.removeItem('dz_user_email');
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Synchronize samples state across views in real-time
   React.useEffect(() => {
@@ -52,16 +75,31 @@ export default function App() {
   const [isGeneratingVisual, setIsGeneratingVisual] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleUserLogin = (email: string) => {
-    const clean = email.trim();
-    setCurrentUserEmail(clean);
+  const handleUserLogin = async (email: string) => {
     try {
-      localStorage.setItem('dz_user_email', clean);
-    } catch {}
+      const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      const data = await res.json();
+      if (res.ok && data.authenticated && data.user && data.user.email.toLowerCase() === email.trim().toLowerCase()) {
+        setCurrentUserEmail(data.user.email);
+        setCurrentUserRole(data.user.role);
+        localStorage.setItem('dz_user_email', data.user.email);
+      } else {
+        setCurrentUserEmail(null);
+        setCurrentUserRole(null);
+      }
+    } catch (err) {
+      console.warn('Server session verification failed:', err);
+      setCurrentUserEmail(null);
+      setCurrentUserRole(null);
+    }
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
     setCurrentUserEmail(null);
+    setCurrentUserRole(null);
     try {
       localStorage.removeItem('dz_user_email');
     } catch {}
@@ -70,12 +108,11 @@ export default function App() {
     }
   };
 
-  const handleQuickAdminLogin = () => {
-    handleUserLogin(ADMIN_EMAIL);
-    setActiveTab('admin');
+  const handleQuickAdminLogin = async () => {
+    setAdminLoginError('الدخول السريع للمدير غير متاح. أدخل كلمة مرور المدير السرية للتحقق من هويتك.');
   };
 
-  const handleAdminFormSubmit = (e: React.FormEvent) => {
+  const handleAdminFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adminLoginFormEmail.trim()) {
       setAdminLoginError('يرجى إدخال البريد الإلكتروني');
@@ -85,11 +122,35 @@ export default function App() {
       setAdminLoginError(`عذراً، البريد المدخل غير مصرح له بالإدارة. الوصول محصور حصرياً للمالك: ${ADMIN_EMAIL}`);
       return;
     }
-    setAdminLoginError(null);
-    handleUserLogin(ADMIN_EMAIL);
+
+    try {
+      const res = await fetch('/api/auth/admin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: adminLoginFormEmail.trim(),
+          password: adminLoginFormPassword.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.user) {
+        setAdminLoginError(null);
+        setCurrentUserEmail(data.user.email);
+        setCurrentUserRole('admin');
+        try {
+          localStorage.setItem('dz_user_email', data.user.email);
+        } catch {}
+        setActiveTab('admin');
+      } else {
+        setAdminLoginError(data.message || 'فشل التحقق من هوية المالك.');
+      }
+    } catch {
+      setAdminLoginError('حدث خطأ أثناء الاتصال بالخادم للتحقق من هوية المالك.');
+    }
   };
 
-  const isAdmin = isAdminUser(currentUserEmail);
+  // Strictly require server-side verified admin role AND verified email
+  const isAdmin = currentUserRole === 'admin' && isAdminUser(currentUserEmail);
 
   const handleGenerateCampaign = async (formData: {
     prompt: string;
@@ -250,6 +311,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         onOpenSample={handleLoadDemo}
         currentUserEmail={currentUserEmail}
+        isAdmin={isAdmin}
         onSignOut={handleSignOut}
         onQuickAdminLogin={handleQuickAdminLogin}
       />

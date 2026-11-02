@@ -1,12 +1,35 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { verifyDatabaseConnection, closeDatabasePool } from './src/server/database';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
+import {
+  initializeAuthStore,
+  authMiddleware,
+  requireAuth,
+  requireAdmin,
+  rateLimiter,
+  registerOrGetUser,
+  createSession,
+  destroySession,
+  setAuthCookie,
+  clearAuthCookie,
+  checkGenerationAllowance,
+  verifyPassword,
+  createUser,
+  authenticateUser,
+  setUserPassword,
+  getUserByEmail,
+  consumeGenerationAllowance,
+  getAllUsers,
+  ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
+} from './src/server/security';
 
 dotenv.config();
 
@@ -16,7 +39,32 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use('/api', (_req: Request, res: Response, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+});
+app.use(authMiddleware);
+
+// Rate Limiters for Security
+const authLimiter = rateLimiter({
+  windowMs: 5 * 60 * 1000,
+  maxRequests: 25,
+  message: 'تم تجاوز عدد محاولات الدخول. يرجى الانتظار 5 دقائق قبل المحاولة مجدداً.',
+});
+
+const genLimiter = rateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 30,
+  message: 'تم تجاوز معدل التوليد المسموح به في الدقيقة. يرجى الانتظار لحظات.',
+});
+
+const adminLimiter = rateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 50,
+  message: 'تم تجاوز حد طلبات لوحة الإدارة.',
+});
 
 // Shared server-side Gemini client with required User-Agent
 const ai = new GoogleGenAI({
@@ -28,12 +76,154 @@ const ai = new GoogleGenAI({
   },
 });
 
+// Health-check endpoint
+app.get('/api/health', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    await verifyDatabaseConnection();
+    res.json({ status: 'ok', database: 'connected', uptimeSeconds: Math.floor(process.uptime()), timestamp: new Date().toISOString() });
+  } catch {
+    res.status(503).json({ status: 'unavailable', database: 'disconnected' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// AUTHENTICATION & SESSION ENDPOINTS (SERVER-SIDE)
+// ----------------------------------------------------------------------------
+
+// Endpoint: Email registration and password login
+app.post('/api/auth/login', authLimiter, async (req: Request, res: Response): Promise<void> => {
+  const { email, password, mode = 'login' } = req.body || {};
+  if (typeof email !== 'string' || typeof password !== 'string') {
+    res.status(400).json({ error: 'CREDENTIALS_REQUIRED', message: 'البريد الإلكتروني وكلمة المرور مطلوبان.' });
+    return;
+  }
+  if (password.length > 128 || password.length < 10) {
+    res.status(400).json({ error: 'INVALID_PASSWORD', message: 'كلمة المرور يجب أن تكون بين 10 و128 حرفاً.' });
+    return;
+  }
+
+  let user;
+  try {
+    if (mode === 'signup') {
+      user = await createUser(email, password);
+    } else if (mode === 'login') {
+      user = await authenticateUser(email, password);
+      if (!user) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
+        return;
+      }
+    } else {
+      res.status(400).json({ error: 'INVALID_AUTH_MODE', message: 'نوع العملية غير صالح.' });
+      return;
+    }
+  } catch (err) {
+    const code = err instanceof Error ? err.message : '';
+    const validationErrors = ['ADMIN_REGISTRATION_DISABLED', 'INVALID_EMAIL', 'WEAK_PASSWORD'];
+    const status = code === 'ACCOUNT_EXISTS' ? 409 : validationErrors.includes(code) ? 400 : 500;
+    const messages: Record<string, string> = {
+      ACCOUNT_EXISTS: 'هذا الحساب موجود بالفعل. اختر تسجيل الدخول.',
+      ADMIN_REGISTRATION_DISABLED: 'تسجيل حساب المالك غير متاح من هذه الصفحة.',
+      INVALID_EMAIL: 'صيغة البريد الإلكتروني غير صحيحة.',
+      WEAK_PASSWORD: 'كلمة المرور يجب أن تكون 10 أحرف على الأقل.',
+    };
+    res.status(status).json({ error: code || 'REGISTRATION_FAILED', message: messages[code] || 'تعذر إنشاء الحساب.' });
+    return;
+  }
+
+  const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
+  const session = await createSession(user.id, ip);
+  setAuthCookie(res, session.token);
+  res.json({ success: true, user: {
+    id: user.id, email: user.email, role: user.role, plan: user.plan,
+    trialGenerationsUsed: user.trialGenerationsUsed, trialGenerationsLimit: user.trialGenerationsLimit,
+    monthlyGenerationsUsed: user.monthlyGenerationsUsed, monthlyGenerationsLimit: user.monthlyGenerationsLimit,
+  } });
+});
+
+// Owner login: requires a separately configured high-entropy ADMIN_PASSWORD secret.
+app.post('/api/auth/admin-login', authLimiter, async (req: Request, res: Response): Promise<void> => {
+  const { email, password } = req.body || {};
+  const configuredSecret = process.env.ADMIN_PASSWORD;
+  if (!configuredSecret || configuredSecret.length < 16) {
+    res.status(503).json({ error: 'ADMIN_AUTH_NOT_CONFIGURED', message: 'دخول المدير غير مهيأ. أضف ADMIN_PASSWORD سرياً بطول 16 حرفاً على الأقل في إعدادات الخادم.' });
+    return;
+  }
+  if (typeof email !== 'string' || typeof password !== 'string' || email.trim().toLowerCase() !== SECURITY_ADMIN_EMAIL.toLowerCase()) {
+    res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'بيانات دخول المالك غير صحيحة.' });
+    return;
+  }
+  const provided = Buffer.from(password);
+  const expected = Buffer.from(configuredSecret);
+  const secretMatches = provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  if (!secretMatches) {
+    res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'كلمة مرور المالك غير صحيحة.' });
+    return;
+  }
+
+  let adminUser = await getUserByEmail(SECURITY_ADMIN_EMAIL);
+  if (!adminUser) adminUser = await registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
+  // Rotate any legacy seeded/default hash to the configured deployment secret.
+  if (!adminUser.passwordHash || !adminUser.salt || !verifyPassword(password, adminUser.salt, adminUser.passwordHash)) {
+    adminUser = (await setUserPassword(adminUser.id, configuredSecret)) || adminUser;
+  }
+  const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
+  const session = await createSession(adminUser.id, ip);
+  setAuthCookie(res, session.token);
+  res.json({ success: true, user: {
+    id: adminUser.id, email: adminUser.email, role: 'admin', plan: 'business',
+    trialGenerationsUsed: adminUser.trialGenerationsUsed, trialGenerationsLimit: adminUser.trialGenerationsLimit,
+    monthlyGenerationsUsed: adminUser.monthlyGenerationsUsed, monthlyGenerationsLimit: adminUser.monthlyGenerationsLimit,
+  } });
+});
+
+// Google sign-in is intentionally disabled until a verified Google ID token flow is configured.
+app.post('/api/auth/google', authLimiter, (_req: Request, res: Response): void => {
+  res.status(501).json({ error: 'GOOGLE_OAUTH_NOT_CONFIGURED', message: 'تسجيل Google غير مفعّل حالياً. استخدم البريد وكلمة المرور إلى حين إعداد OAuth والتحقق من رمز Google على الخادم.' });
+});
+
+// Endpoint: Get Current Authenticated Session & User Profile
+app.get('/api/auth/me', (req: Request, res: Response): void => {
+  if (!req.user) {
+    res.json({ authenticated: false });
+    return;
+  }
+
+  res.json({
+    authenticated: true,
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      role: req.user.role,
+      plan: req.user.plan,
+      trialGenerationsUsed: req.user.trialGenerationsUsed,
+      trialGenerationsLimit: req.user.trialGenerationsLimit,
+      monthlyGenerationsUsed: req.user.monthlyGenerationsUsed,
+      monthlyGenerationsLimit: req.user.monthlyGenerationsLimit,
+    },
+  });
+});
+
+// Endpoint: Logout and destroy session
+app.post('/api/auth/logout', async (req: Request, res: Response): Promise<void> => {
+  if (req.session) {
+    await destroySession(req.session.token);
+  }
+  clearAuthCookie(res);
+  res.json({ success: true, message: 'تم تسجيل الخروج بنجاح.' });
+});
+
+// Endpoint: Check Generation Allowance
+app.get('/api/auth/allowance', requireAuth, (req: Request, res: Response): void => {
+  const allowance = checkGenerationAllowance(req.user);
+  res.json(allowance);
+});
+
 // Endpoint: Generate complete email marketing campaign
-app.post('/api/generate-campaign', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-campaign', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, tone, audience, goal } = req.body;
-    if (!prompt) {
-      res.status(400).json({ error: 'Prompt is required' });
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) {
+      res.status(400).json({ error: 'INVALID_PROMPT', message: 'النص مطلوب ويجب ألا يتجاوز 4000 حرف.' });
       return;
     }
 
@@ -116,11 +306,11 @@ Generate:
 
 // Endpoint: Generate high-resolution email visuals with 1K, 2K, 4K affordance
 // Uses model gemini-3-pro-image-preview as required
-app.post('/api/generate-image', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-image', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, aspectRatio = '16:9', imageSize = '2K', style = 'Cinematic 3D Modern' } = req.body;
-    if (!prompt) {
-      res.status(400).json({ error: 'Prompt is required' });
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) {
+      res.status(400).json({ error: 'INVALID_PROMPT', message: 'النص مطلوب ويجب ألا يتجاوز 4000 حرف.' });
       return;
     }
 
@@ -206,11 +396,11 @@ app.post('/api/generate-image', async (req: Request, res: Response): Promise<voi
 
 // Endpoint: Unified Algerian Script Generation & Direct TTS Voiceover Pipeline
 // Fulfills Requirement 1 & 2: Receives user script/prompt, dialect, voice, and outputs refined script + playable WAV audio URL in one seamless call.
-app.post('/api/generate-voice-script', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-voice-script', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { prompt, dialect = 'general', voice = 'Zephyr', tone, targetAudience } = req.body;
-    if (!prompt) {
-      res.status(400).json({ error: 'Prompt or script draft is required' });
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 5000) {
+      res.status(400).json({ error: 'INVALID_PROMPT', message: 'النص مطلوب ويجب ألا يتجاوز 5000 حرف.' });
       return;
     }
 
@@ -353,11 +543,11 @@ app.post('/api/generate-voice-script', async (req: Request, res: Response): Prom
 
 // Endpoint: Generate Algerian Outro Voiceover / Speech
 // Uses gemini-3.8-flash-lite-tts or gemini-3.8-flash-tts
-app.post('/api/generate-speech', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { text, voiceName = 'Zephyr', speechStyle } = req.body;
-    if (!text) {
-      res.status(400).json({ error: 'Text is required' });
+    if (typeof text !== 'string' || !text.trim() || text.length > 5000) {
+      res.status(400).json({ error: 'INVALID_TEXT', message: 'النص مطلوب ويجب ألا يتجاوز 5000 حرف.' });
       return;
     }
 
@@ -441,11 +631,11 @@ app.post('/api/generate-speech', async (req: Request, res: Response): Promise<vo
 });
 
 // Endpoint: Specialized Algerian E-Commerce Ad Voice Generation (Algiers Dialect + Code-Switching)
-app.post('/api/generate-ecommerce-ad-speech', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-ecommerce-ad-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, adContext, frenchLoanwords } = req.body;
-    if (!scriptText) {
-      res.status(400).json({ error: 'scriptText is required' });
+    if (typeof scriptText !== 'string' || !scriptText.trim() || scriptText.length > 5000) {
+      res.status(400).json({ error: 'INVALID_SCRIPT', message: 'النص مطلوب ويجب ألا يتجاوز 5000 حرف.' });
       return;
     }
 
@@ -488,8 +678,8 @@ app.get('/api/personas', (_req: Request, res: Response): void => {
   });
 });
 
-// Endpoint: Admin Test & Verify Gemini API Key / Model Connection
-app.post('/api/admin/verify-api-key', async (req: Request, res: Response): Promise<void> => {
+// Endpoint: Admin Test & Verify Gemini API Key / Model Connection (Protected by requireAdmin)
+app.post('/api/admin/verify-api-key', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
     const { apiKey, model = 'gemini-3.8-flash' } = req.body;
     const clientToUse = apiKey && apiKey.trim()
@@ -555,8 +745,8 @@ app.post('/api/admin/verify-api-key', async (req: Request, res: Response): Promi
   }
 });
 
-// Endpoint: Admin System Stats
-app.get('/api/admin/system-stats', (_req: Request, res: Response): void => {
+// Endpoint: Admin System Stats (Protected by requireAdmin)
+app.get('/api/admin/system-stats', adminLimiter, requireAdmin, (_req: Request, res: Response): void => {
   res.json({
     platformName: 'صوت التجارة DZ - استوديو الإعلانات العاصمية',
     serverTime: new Date().toISOString(),
@@ -574,12 +764,33 @@ app.get('/api/admin/system-stats', (_req: Request, res: Response): void => {
   });
 });
 
-// Endpoint: Conflict-Free Algiers Persona & Emotion Voice Synthesis
-app.post('/api/generate-persona-speech', async (req: Request, res: Response): Promise<void> => {
+// Endpoint: Admin Registered Users List (Protected by requireAdmin)
+app.get('/api/admin/users', adminLimiter, requireAdmin, async (_req: Request, res: Response): Promise<void> => {
+  const allUsers = await getAllUsers();
+  res.json({
+    success: true,
+    total: allUsers.length,
+    users: allUsers.map((u) => ({
+      id: u.id,
+      email: u.email,
+      role: u.role,
+      plan: u.plan,
+      trialGenerationsUsed: u.trialGenerationsUsed,
+      trialGenerationsLimit: u.trialGenerationsLimit,
+      monthlyGenerationsUsed: u.monthlyGenerationsUsed,
+      monthlyGenerationsLimit: u.monthlyGenerationsLimit,
+      createdAt: u.createdAt,
+      lastLoginAt: u.lastLoginAt,
+    })),
+  });
+});
+
+// Endpoint: Conflict-Free Algiers Persona & Emotion Voice Synthesis (Rate limited & usage controlled)
+app.post('/api/generate-persona-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, persona, emotionalCue, extraDirectives } = req.body;
-    if (!scriptText) {
-      res.status(400).json({ error: 'scriptText is required' });
+    if (typeof scriptText !== 'string' || !scriptText.trim() || scriptText.length > 2500) {
+      res.status(400).json({ error: 'INVALID_SCRIPT', message: 'النص مطلوب ويجب ألا يتجاوز 2500 حرف.' });
       return;
     }
 
@@ -601,11 +812,11 @@ app.post('/api/generate-persona-speech', async (req: Request, res: Response): Pr
 });
 
 // Endpoint: Extract Product Data from URL & Generate Algiers E-Commerce Ad Script
-app.post('/api/generate-script-from-url', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/generate-script-from-url', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { productUrl, campaignType = 'ecommerce_flash_sale', persona = 'zephyr_warm' } = req.body;
-    if (!productUrl) {
-      res.status(400).json({ error: 'productUrl is required' });
+    if (typeof productUrl !== 'string' || !productUrl.trim() || productUrl.length > 2048) {
+      res.status(400).json({ error: 'INVALID_PRODUCT_URL', message: 'رابط المنتج مطلوب ويجب ألا يتجاوز 2048 حرفاً.' });
       return;
     }
 
@@ -640,10 +851,10 @@ app.post('/api/generate-script-from-url', async (req: Request, res: Response): P
 
 // Endpoint: Multi-Turn Gemini Chatbot
 // Supports gemini-3.8-flash (General), gemini-4-argon (Complex Tasks), gemini-3.1-flash-lite (Fast Tasks)
-app.post('/api/chat', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/chat', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { messages, model = 'gemini-3.8-flash', roleType = 'email_marketer' } = req.body;
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (!Array.isArray(messages) || messages.length === 0 || messages.length > 20 || messages.some((m: any) => !m || typeof m.content !== 'string' || m.content.length > 8000)) {
       res.status(400).json({ error: 'Messages array is required' });
       return;
     }
@@ -1007,6 +1218,7 @@ With this new solution, you eliminate tedious guesswork and move straight to hig
 
 // Mount Vite or serve static assets
 async function startServer() {
+  await initializeAuthStore();
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -1021,9 +1233,28 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`CampaignForge Server running on http://0.0.0.0:${PORT}`);
+  const httpServer = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`MailCraft AI server running on port ${PORT}`);
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}; shutting down gracefully.`);
+    httpServer.close(async (error) => {
+      if (error) console.error('HTTP server shutdown error:', error);
+      try {
+        await closeDatabasePool();
+      } catch (dbError) {
+        console.error('Database pool shutdown error:', dbError);
+      } finally {
+        process.exit(error ? 1 : 0);
+      }
+    });
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch((err) => {
