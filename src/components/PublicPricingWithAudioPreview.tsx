@@ -41,6 +41,12 @@ import {
   SAMPLES_UPDATED_EVENT,
 } from '../services/adminStore';
 
+type AuthResponse = {
+  success?: boolean;
+  user?: { email: string };
+  message?: string;
+};
+
 interface PublicPricingWithAudioPreviewProps {
   onEnterStudio: () => void;
   onLoginSuccess?: (userEmail: string) => void;
@@ -273,7 +279,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
           ...(isOwner ? {} : { mode: authMode }),
         }),
       });
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch((): AuthResponse => ({}));
       if (!response.ok || !data.success || !data.user) {
         setAuthSuccessMessage(data.message || 'تعذر تسجيل الدخول. تحقق من البيانات وحاول مجدداً.');
         setIsSubmittingAuth(false);
