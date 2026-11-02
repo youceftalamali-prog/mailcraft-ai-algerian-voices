@@ -43,14 +43,14 @@ type ApiErrorResponse = { error?: string; message?: string };
 type GenerateScriptResponse = {
   extractedProduct: ExtractedProductData;
   generatedScript: string;
-  suggestedEmotion?: EmotionalCue | string;
+  suggestedEmotion?: EmotionalCue;
 };
 type PersonaSpeechResponse = {
   audioDataUrl: string;
   persona: { title: string; avatar: string };
   emotionState: {
-    requested: string;
-    resolved: string;
+    requested: EmotionalCue;
+    resolved: EmotionalCue;
     wasConflictResolved: boolean;
     resolutionNote?: string;
   };
@@ -306,7 +306,7 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch((): ApiErrorResponse => ({}));
+        const errorData = await response.json().catch(() => ({})) as ApiErrorResponse;
         if (response.status === 403 && errorData.error === 'USAGE_LIMIT_EXCEEDED') {
           setFreeTrialUsed(true);
           setShowUpgradeModal(true);
@@ -452,7 +452,7 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
         const serverPlan: UserPlanTier =
           allowance.plan === 'admin_unlimited' ? 'business' :
           allowance.plan === 'free' ? 'free_trial' :
-          ['starter', 'pro', 'business'].includes(allowance.plan) ? allowance.plan : 'free_trial';
+          (allowance.plan === 'starter' || allowance.plan === 'pro' || allowance.plan === 'business') ? allowance.plan : 'free_trial';
         setUserPlan(serverPlan);
         setFreeTrialUsed(serverPlan === 'free_trial' && allowance.remaining === 0);
       })
