@@ -100,6 +100,15 @@ function getWorkerDatabaseAdapter(context: WorkerDatabaseContext): DatabaseAdapt
   };
 }
 
+export function getWorkerDatabaseContextStatus(): { active: boolean; clientCreated: boolean; connectionPending: boolean } {
+  const context = workerDatabaseContext.getStore();
+  return {
+    active: Boolean(context),
+    clientCreated: Boolean(context?.client),
+    connectionPending: Boolean(context?.connected),
+  };
+}
+
 export function getRequestEnvironmentValue(name: string): string | undefined {
   const workerContext = workerDatabaseContext.getStore();
   return workerContext?.env?.[name] ?? process.env[name];
