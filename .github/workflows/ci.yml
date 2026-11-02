@@ -4,11 +4,27 @@ on:
   pull_request:
     branches: [main, "feat/cloudflare-workers-deployment"]
   push:
-    branches: [main, "fix/security-hardening-*", "feat/cloudflare-workers-deployment", "grok/full-project-repair"]
+    branches: [main, "fix/security-hardening-*", "feat/cloudflare-workers-deployment", "grok/full-project-repair", "fix/auth-*"]
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mailcraft_test
+          POSTGRES_PASSWORD: mailcraft_test
+          POSTGRES_DB: mailcraft_auth_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mailcraft_test -d mailcraft_auth_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://mailcraft_test:mailcraft_test@localhost:5432/mailcraft_auth_test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
