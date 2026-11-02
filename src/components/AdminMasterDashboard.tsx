@@ -1,4 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
+
+type AudioGenerationResponse = { audioDataUrl?: string };
+type ApiVerificationResponse = {
+  success: boolean;
+  latencyMs?: number;
+  message?: string;
+  modelUsed?: string;
+};
 import {
   ShieldCheck,
   CreditCard,
@@ -151,7 +159,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   // Fetch live system stats on mount
   useEffect(() => {
     fetch('/api/admin/system-stats')
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => (res.ok ? res.json() as Promise<NonNullable<typeof systemStats>> : null))
       .then((data) => {
         if (data) setSystemStats(data);
       })
@@ -380,7 +388,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as AudioGenerationResponse;
       if (data.audioDataUrl) {
         setUploadedAudioDataUrl(data.audioDataUrl);
         setUploadedFileName(`ai-voice-${newSamplePersonaId}.wav`);
@@ -573,7 +581,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as ApiVerificationResponse;
       setApiVerificationResult(data);
     } catch (err: unknown) {
       setApiVerificationResult({
