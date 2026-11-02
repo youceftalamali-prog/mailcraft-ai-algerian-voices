@@ -94,6 +94,16 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     const loginMe = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: loginCookie } });
     assert.equal((await loginMe.json() as { authenticated: boolean }).authenticated, true);
 
+    const loginToken = loginCookie.slice('dz_session='.length);
+    const loginTokenHash = crypto.createHash('sha256').update(loginToken).digest('hex');
+    await getDatabasePool().query(
+      "UPDATE app_sessions SET expires_at=NOW() - INTERVAL '1 second' WHERE token_hash=$1",
+      [loginTokenHash],
+    );
+    const expiredSessionResponse = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: loginCookie } });
+    assert.deepEqual(await expiredSessionResponse.json(), { authenticated: false },
+      'expired sessions must not authenticate requests');
+
     // Simulate a legacy owner row with a downgraded role in the disposable DB.
     const owner = await registerOrGetUser(ADMIN_EMAIL, 'admin');
     await updateUser(owner.id, { role: 'user', plan: 'free' });
