@@ -444,7 +444,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as AudioGenerationResponse;
       if (data.audioDataUrl) {
         setEditSampleAudioUrl(data.audioDataUrl);
         setEditSampleFileName(`ai-speech-${editingSample.personaId}.wav`);
