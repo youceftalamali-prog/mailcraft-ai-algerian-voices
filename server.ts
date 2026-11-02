@@ -12,6 +12,7 @@ import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoice
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
 import {
+  initializeAuthStore,
   authMiddleware,
   requireAuth,
   requireAdmin,
@@ -102,6 +103,28 @@ app.use('/api', (_req: Request, res: Response, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   next();
 });
+// Ensure the persistent auth tables exist before session lookup or auth routes.
+// The promise is isolate-local; failed initialization is retried on the next request.
+let authStoreInitialization: Promise<void> | null = null;
+app.use(async (req: Request, _res: Response, next) => {
+  if (!req.path.startsWith('/api/')) {
+    next();
+    return;
+  }
+  try {
+    if (!authStoreInitialization) {
+      authStoreInitialization = initializeAuthStore().catch((error: unknown) => {
+        authStoreInitialization = null;
+        throw error;
+      });
+    }
+    await authStoreInitialization;
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use(authMiddleware);
 
 // Rate Limiters for Security
