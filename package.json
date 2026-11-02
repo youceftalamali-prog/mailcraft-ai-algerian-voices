@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "wrangler types && tsc --noEmit",
-    "test": "tsx --test src/utils/admin.test.ts src/utils/audioFallback.test.ts src/utils/campaign.test.ts src/utils/persona.test.ts src/utils/scraper.test.ts src/utils/security.test.ts src/utils/speechSynthesisService.test.ts",
+    "test": "tsx --test src/utils/admin.test.ts src/utils/audioFallback.test.ts src/utils/campaign.test.ts src/utils/persona.test.ts src/utils/scraper.test.ts src/utils/security.test.ts src/utils/authApi.integration.test.ts src/utils/speechSynthesisService.test.ts",
     "dev:worker": "wrangler dev",
     "build:worker": "wrangler deploy --dry-run",
     "deploy:worker": "wrangler deploy",
