@@ -32,7 +32,9 @@ const sessionFromRow = (r: any, token: string): ServerSession => ({
   expiresAt: new Date(r.expires_at).getTime(), ip: r.ip,
 });
 
-export async function initializeAuthStore(): Promise<void> {
+let authStoreInitialization: Promise<void> | null = null;
+
+async function createAuthStoreSchema(): Promise<void> {
   const db = getDatabasePool();
   await db.query(`
     CREATE TABLE IF NOT EXISTS app_users (
@@ -55,6 +57,21 @@ export async function initializeAuthStore(): Promise<void> {
   await db.query('CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id)');
   await db.query('CREATE INDEX IF NOT EXISTS app_sessions_expires_at_idx ON app_sessions(expires_at)');
   await db.query('DELETE FROM app_sessions WHERE expires_at <= NOW()');
+}
+
+/**
+ * Share schema initialization across concurrent requests and tests in this
+ * process. A rejected attempt clears the cached promise so the next request
+ * can retry after a transient database failure.
+ */
+export function initializeAuthStore(): Promise<void> {
+  if (!authStoreInitialization) {
+    authStoreInitialization = createAuthStoreSchema().catch((error: unknown) => {
+      authStoreInitialization = null;
+      throw error;
+    });
+  }
+  return authStoreInitialization;
 }
 
 export function hashPassword(password: string, salt: string): string {
