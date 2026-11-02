@@ -3,6 +3,17 @@ import * as cheerio from 'cheerio';
 import { isIP } from 'node:net';
 import { AlgiersPersonaId } from './algerianPersonaVoiceService';
 
+interface ShopifyProductResponse {
+  product?: {
+    title?: string;
+    body_html?: string;
+    vendor?: string;
+    variants?: Array<{ price?: string }>;
+    image?: { src?: string };
+    images?: Array<{ src?: string }>;
+  };
+}
+
 export interface ExtractedProductData {
   title: string;
   price?: string;
@@ -162,7 +173,7 @@ export async function scrapeProductUrl(productUrl: string): Promise<ExtractedPro
       });
 
       if (jsonRes.ok) {
-        const data = await jsonRes.json();
+        const data = await jsonRes.json() as ShopifyProductResponse;
         if (data.product) {
           const p = data.product;
           const price = p.variants?.[0]?.price ? `${p.variants[0].price} DZD` : undefined;
