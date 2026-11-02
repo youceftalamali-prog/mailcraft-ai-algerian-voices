@@ -1,4 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+
+type ApiErrorResponse = { error?: string; message?: string };
+type AudioGenerationResponse = { audioDataUrl?: string };
 import { AlgerianOutroItem, GeneratedVoiceScriptResult } from '../types/index';
 import {
   ALGERIAN_OUTRO_COLLECTION,
@@ -109,7 +112,7 @@ export const AlgerianOutroStudio: React.FC<AlgerianOutroStudioProps> = ({
       clearTimeout(stepTimer);
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
+        const errorData = await res.json().catch((): ApiErrorResponse => ({}));
         throw new Error(errorData.error || `Server error (${res.status})`);
       }
 
@@ -261,7 +264,7 @@ export const AlgerianOutroStudio: React.FC<AlgerianOutroStudioProps> = ({
           speechStyle: `Friendly lively Algerian Darija outro: ${item.vibe}`,
         }),
       });
-      const data = await res.json();
+      const data = await res.json() as AudioGenerationResponse;
       if (data.audioDataUrl) {
         setOutros((prev) =>
           prev.map((o) => (o.id === item.id ? { ...o, audioDataUrl: data.audioDataUrl } : o))
