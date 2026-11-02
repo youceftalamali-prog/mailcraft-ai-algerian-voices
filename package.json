@@ -12,6 +12,7 @@
     "test": "tsx --test src/utils/admin.test.ts src/utils/audioFallback.test.ts src/utils/campaign.test.ts src/utils/persona.test.ts src/utils/scraper.test.ts src/utils/security.test.ts src/utils/authApi.integration.test.ts src/utils/speechSynthesisService.test.ts",
     "dev:worker": "wrangler dev",
     "build:worker": "wrangler deploy --dry-run",
+    "build:worker:preview": "wrangler deploy --config wrangler.preview.jsonc --dry-run",
     "deploy:worker": "wrangler deploy",
     "postinstall": "node scripts/patch-express-worker.mjs"
   },
