@@ -1,4 +1,4 @@
-import { httpServerHandler } from 'cloudflare:node';
+import { handleAsNodeRequest } from 'cloudflare:node';
 import { app } from '../server';
 import {
   registerWorkerDatabaseContext,
@@ -19,7 +19,6 @@ interface WorkerEnv {
 // Cloudflare's Node HTTP integration preserves the existing Express routes.
 // The Node bootstrap in server.local.ts remains the local development entrypoint.
 app.listen(3000);
-const expressHandler = httpServerHandler({ port: 3000 });
 
 export default {
   fetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -46,7 +45,7 @@ export default {
 
       return (async (): Promise<Response> => {
         try {
-          return await expressHandler(bridgedRequest);
+          return await handleAsNodeRequest(3000, bridgedRequest);
         } catch (error: unknown) {
           const diagnostic = error instanceof Error
             ? { name: error.name, message: error.message }
