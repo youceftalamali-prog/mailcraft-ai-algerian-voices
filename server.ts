@@ -28,6 +28,7 @@ import {
   authenticateUser,
   setUserPassword,
   getUserByEmail,
+  updateUser,
   consumeGenerationAllowance,
   getAllUsers,
   ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
@@ -259,6 +260,9 @@ app.post('/api/auth/admin-login', authLimiter, async (req: Request, res: Respons
 
   let adminUser = await getUserByEmail(SECURITY_ADMIN_EMAIL);
   if (!adminUser) adminUser = await registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
+  // The owner email alone never grants admin rights. After the deployment secret
+  // has been verified above, enforce the canonical owner role on legacy rows.
+  adminUser = (await updateUser(adminUser.id, { role: 'admin', plan: 'business' })) || adminUser;
   // Rotate any legacy seeded/default hash to the configured deployment secret.
   if (!adminUser.passwordHash || !adminUser.salt || !verifyPassword(password, adminUser.salt, adminUser.passwordHash)) {
     adminUser = (await setUserPassword(adminUser.id, configuredSecret)) || adminUser;
