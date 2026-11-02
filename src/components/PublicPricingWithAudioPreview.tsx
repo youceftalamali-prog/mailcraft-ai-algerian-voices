@@ -41,6 +41,12 @@ import {
   SAMPLES_UPDATED_EVENT,
 } from '../services/adminStore';
 
+type EmailAuthResponse = {
+  success?: boolean;
+  user?: { email: string };
+  message?: string;
+};
+
 interface PublicPricingWithAudioPreviewProps {
   onEnterStudio: () => void;
   onLoginSuccess?: (userEmail: string) => void;
