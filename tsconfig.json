@@ -5,6 +5,7 @@
     "useDefineForClassFields": false,
     "module": "ESNext",
     "types": [
+      "./worker-configuration.d.ts",
       "vite/client",
       "node"
     ],
