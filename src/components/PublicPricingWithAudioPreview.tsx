@@ -273,7 +273,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
           ...(isOwner ? {} : { mode: authMode }),
         }),
       });
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch(() => ({})) as EmailAuthResponse;
       if (!response.ok || !data.success || !data.user) {
         setAuthSuccessMessage(data.message || 'تعذر تسجيل الدخول. تحقق من البيانات وحاول مجدداً.');
         setIsSubmittingAuth(false);
