@@ -51,7 +51,12 @@ export default {
           const diagnostic = error instanceof Error
             ? { name: error.name, message: error.message }
             : { type: typeof error };
-          console.error('Worker API request failed:', diagnostic);
+          console.error('Worker API request failed:', {
+            requestId,
+            method: bridgedRequest.method,
+            pathname,
+            ...diagnostic,
+          });
           return Response.json({ error: 'INTERNAL_SERVER_ERROR' }, { status: 500 });
         } finally {
           await releaseWorkerDatabaseContext(requestId);
