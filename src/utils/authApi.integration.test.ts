@@ -23,13 +23,15 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     const address = server.address() as AddressInfo;
     const baseUrl = `http://127.0.0.1:${address.port}`;
 
+    const userEmail = `http-auth-${Date.now()}@example.test`;
+    const userPassword = 'Correct-Horse-Battery-2026!';
     const signupResponse = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         mode: 'signup',
-        email: `http-auth-${Date.now()}@example.test`,
-        password: 'Correct-Horse-Battery-2026!',
+        email: userEmail,
+        password: userPassword,
       }),
     });
     assert.equal(signupResponse.status, 200);
@@ -65,6 +67,24 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     const afterLogout = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie } });
     assert.equal(afterLogout.status, 200);
     assert.deepEqual(await afterLogout.json(), { authenticated: false });
+
+    const rejectedLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'login', email: userEmail, password: 'wrong-password-123' }),
+    });
+    assert.equal(rejectedLogin.status, 401, 'incorrect password must not create a session');
+
+    const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'login', email: userEmail, password: userPassword }),
+    });
+    assert.equal(loginResponse.status, 200);
+    const loginCookie = (loginResponse.headers.get('set-cookie') || '').match(/dz_session=[a-f0-9]{64}/)?.[0];
+    assert.ok(loginCookie, 'successful login must issue a new session cookie');
+    const loginMe = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: loginCookie } });
+    assert.equal((await loginMe.json() as { authenticated: boolean }).authenticated, true);
 
     // Simulate a legacy owner row with a downgraded role in the disposable DB.
     const owner = await registerOrGetUser(ADMIN_EMAIL, 'admin');
