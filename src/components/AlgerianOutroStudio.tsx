@@ -112,7 +112,7 @@ export const AlgerianOutroStudio: React.FC<AlgerianOutroStudioProps> = ({
       clearTimeout(stepTimer);
 
       if (!res.ok) {
-        const errorData = await res.json().catch((): ApiErrorResponse => ({}));
+        const errorData = await res.json().catch(() => ({})) as ApiErrorResponse;
         throw new Error(errorData.error || `Server error (${res.status})`);
       }
 
