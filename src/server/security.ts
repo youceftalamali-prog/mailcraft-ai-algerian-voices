@@ -35,28 +35,39 @@ const sessionFromRow = (r: any, token: string): ServerSession => ({
 let authStoreInitialization: Promise<void> | null = null;
 
 async function createAuthStoreSchema(): Promise<void> {
-  const db = getDatabasePool();
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS app_users (
-      id TEXT PRIMARY KEY, email TEXT NOT NULL, email_normalized TEXT NOT NULL UNIQUE,
-      password_hash TEXT, password_salt TEXT,
-      role TEXT NOT NULL CHECK (role IN ('admin','user')),
-      plan TEXT NOT NULL CHECK (plan IN ('free','starter','pro','business')),
-      trial_generations_used INTEGER NOT NULL DEFAULT 0 CHECK (trial_generations_used >= 0),
-      trial_generations_limit INTEGER NOT NULL DEFAULT 1 CHECK (trial_generations_limit >= 0),
-      monthly_generations_used INTEGER NOT NULL DEFAULT 0 CHECK (monthly_generations_used >= 0),
-      monthly_generations_limit INTEGER NOT NULL DEFAULT 0 CHECK (monthly_generations_limit >= 0),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )`);
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS app_sessions (
-      token_hash CHAR(64) PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
-      created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, ip TEXT NOT NULL DEFAULT 'unknown'
-    )`);
-  await db.query('CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id)');
-  await db.query('CREATE INDEX IF NOT EXISTS app_sessions_expires_at_idx ON app_sessions(expires_at)');
-  await db.query('DELETE FROM app_sessions WHERE expires_at <= NOW()');
+  const client = await getDatabasePool().connect();
+  try {
+    await client.query('BEGIN');
+    // Serialize DDL across Worker isolates and test processes, not just this module instance.
+    await client.query('SELECT pg_advisory_xact_lock($1)', [7_310_202_611]);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_users (
+        id TEXT PRIMARY KEY, email TEXT NOT NULL, email_normalized TEXT NOT NULL UNIQUE,
+        password_hash TEXT, password_salt TEXT,
+        role TEXT NOT NULL CHECK (role IN ('admin','user')),
+        plan TEXT NOT NULL CHECK (plan IN ('free','starter','pro','business')),
+        trial_generations_used INTEGER NOT NULL DEFAULT 0 CHECK (trial_generations_used >= 0),
+        trial_generations_limit INTEGER NOT NULL DEFAULT 1 CHECK (trial_generations_limit >= 0),
+        monthly_generations_used INTEGER NOT NULL DEFAULT 0 CHECK (monthly_generations_used >= 0),
+        monthly_generations_limit INTEGER NOT NULL DEFAULT 0 CHECK (monthly_generations_limit >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_sessions (
+        token_hash CHAR(64) PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, ip TEXT NOT NULL DEFAULT 'unknown'
+      )`);
+    await client.query('CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS app_sessions_expires_at_idx ON app_sessions(expires_at)');
+    await client.query('DELETE FROM app_sessions WHERE expires_at <= NOW()');
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
