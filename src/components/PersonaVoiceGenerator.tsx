@@ -39,6 +39,28 @@ import {
 } from '../services/algerianPersonaVoiceService';
 import { ExtractedProductData } from '../services/productScraperService';
 
+type ApiErrorResponse = { error?: string; message?: string };
+type GenerateScriptResponse = {
+  extractedProduct: ExtractedProductData;
+  generatedScript: string;
+  suggestedEmotion?: EmotionalCue | string;
+};
+type PersonaSpeechResponse = {
+  audioDataUrl: string;
+  persona: { title: string; avatar: string };
+  emotionState: {
+    requested: string;
+    resolved: string;
+    wasConflictResolved: boolean;
+    resolutionNote?: string;
+  };
+  durationEstimateSeconds: number;
+  voiceUsed: string;
+  quotaExceeded?: boolean;
+  quotaMessage?: string;
+};
+type AllowanceResponse = { plan: string; remaining: number };
+
 export type UserPlanTier = 'free_trial' | 'starter' | 'pro' | 'business';
 
 interface PersonaVoiceGeneratorProps {
@@ -218,11 +240,11 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
+        const errorData = await res.json().catch((): ApiErrorResponse => ({}));
         throw new Error(errorData.error || `خطأ أثناء استخراج تفاصيل المنتج (${res.status})`);
       }
 
-      const data = await res.json();
+      const data = await res.json() as GenerateScriptResponse;
       setScrapedProduct(data.extractedProduct);
 
       // Ensure script respects free trial length
@@ -284,7 +306,7 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = await response.json().catch((): ApiErrorResponse => ({}));
         if (response.status === 403 && errorData.error === 'USAGE_LIMIT_EXCEEDED') {
           setFreeTrialUsed(true);
           setShowUpgradeModal(true);
@@ -293,7 +315,7 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
         throw new Error(errorData.message || errorData.error || `خطأ في الخادم (${response.status})`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as PersonaSpeechResponse;
 
       setGeneratedAudioUrl(data.audioDataUrl);
       setResultMetadata({
@@ -423,7 +445,7 @@ export const PersonaVoiceGenerator: React.FC<PersonaVoiceGeneratorProps> = ({
     fetch('/api/auth/allowance', { credentials: 'same-origin' })
       .then(async (response) => {
         if (!response.ok) return null;
-        return response.json();
+        return response.json() as Promise<AllowanceResponse>;
       })
       .then((allowance) => {
         if (cancelled || !allowance) return;
