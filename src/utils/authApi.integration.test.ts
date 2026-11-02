@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { app } from '../../server.js';
@@ -46,6 +47,13 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     assert.match(setCookie, /SameSite=Lax/i);
     const cookie = setCookie.match(/dz_session=[a-f0-9]{64}/)?.[0];
     assert.ok(cookie, 'signup must issue a session cookie');
+    const rawSessionToken = cookie.slice('dz_session='.length);
+    const storedSession = await getDatabasePool().query(
+      'SELECT token_hash FROM app_sessions WHERE token_hash=$1',
+      [crypto.createHash('sha256').update(rawSessionToken).digest('hex')],
+    );
+    assert.equal(storedSession.rowCount, 1, 'database must store the SHA-256 digest of the session token');
+    assert.notEqual(storedSession.rows[0]?.token_hash, rawSessionToken, 'raw session token must never be stored');
 
     const meResponse = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie } });
     assert.equal(meResponse.status, 200);
