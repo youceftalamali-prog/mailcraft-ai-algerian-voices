@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
   getRequestEnvironmentValue,
+  getWorkerDatabaseContextStatus,
   runWithRegisteredWorkerDatabaseContext,
   verifyDatabaseConnection,
 } from './src/server/database';
@@ -131,12 +132,27 @@ function createGeminiClient(apiKey = getRequestEnvironmentValue('GEMINI_API_KEY'
   });
 }
 
+// Runtime-only health check: confirms the request reached Express and restored
+// the Worker-scoped database context without issuing any database query.
+app.get('/api/health/runtime', (_req: Request, res: Response): void => {
+  res.json({
+    status: 'ok',
+    runtime: 'cloudflare-worker-express',
+    databaseContext: getWorkerDatabaseContextStatus(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Health-check endpoint
 app.get('/api/health', async (_req: Request, res: Response): Promise<void> => {
   try {
     await verifyDatabaseConnection();
     res.json({ status: 'ok', database: 'connected', uptimeSeconds: Math.floor(process.uptime()), timestamp: new Date().toISOString() });
-  } catch {
+  } catch (error: unknown) {
+    const diagnostic = error instanceof Error
+      ? { name: error.name, code: 'code' in error ? String(error.code) : undefined }
+      : { name: 'UnknownError' };
+    console.error('Database health check failed:', diagnostic);
     res.status(503).json({ status: 'unavailable', database: 'disconnected' });
   }
 });
