@@ -279,7 +279,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
           ...(isOwner ? {} : { mode: authMode }),
         }),
       });
-      const data = await response.json().catch((): AuthResponse => ({}));
+      const data = await response.json().catch(() => ({})) as AuthResponse;
       if (!response.ok || !data.success || !data.user) {
         setAuthSuccessMessage(data.message || 'تعذر تسجيل الدخول. تحقق من البيانات وحاول مجدداً.');
         setIsSubmittingAuth(false);
