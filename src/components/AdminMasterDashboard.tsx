@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-type AudioGenerationResponse = { audioDataUrl?: string; error?: string; message?: string; details?: string };
+type AudioGenerationResponse = { audioDataUrl?: string; fallbackUsed?: boolean; error?: string; message?: string; details?: string };
 type ApiVerificationResponse = {
   success: boolean;
   latencyMs?: number;
@@ -403,7 +403,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       });
 
       const data = await res.json() as AudioGenerationResponse;
-      if (!res.ok || !data.audioDataUrl) {
+      if (!res.ok || !data.audioDataUrl || data.fallbackUsed) {
         throw new Error(data.details || data.message || data.error || `TTS request failed: ${res.status}`);
       }
       setUploadedAudioDataUrl(data.audioDataUrl);
