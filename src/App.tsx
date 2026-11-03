@@ -11,11 +11,11 @@ import { EmailCampaign } from './types/index';
 import { generateDefaultCampaign } from './utils/campaign';
 import {
   ShowcaseAudioSample,
-  loadAdminShowcaseSamples,
+  INITIAL_SHOWCASE_SAMPLES,
   ADMIN_EMAIL,
   isAdminUser,
-  SAMPLES_UPDATED_EVENT,
 } from './services/adminStore';
+import { loadShowcaseSamplesFromServer } from './services/showcaseSamplesApi';
 import { Sparkles, AlertCircle, Wand2, Mic, MessageSquare, ShieldCheck, Lock, ShieldAlert, KeyRound, Crown, ArrowRight, CheckCircle2 } from 'lucide-react';
 
 type SessionUser = { email: string; role: 'admin' | 'user' };
@@ -37,8 +37,23 @@ export default function App() {
   const [adminLoginFormPassword, setAdminLoginFormPassword] = useState('');
   const [adminLoginError, setAdminLoginError] = useState<string | null>(null);
   const [showcaseSamples, setShowcaseSamples] = useState<ShowcaseAudioSample[]>(() =>
-    loadAdminShowcaseSamples()
+    INITIAL_SHOWCASE_SAMPLES
   );
+
+  // Showcase samples are shared server data, not per-browser localStorage.
+  React.useEffect(() => {
+    let active = true;
+    loadShowcaseSamplesFromServer()
+      .then((samples) => {
+        if (active) setShowcaseSamples(samples);
+      })
+      .catch((error: unknown) => {
+        console.warn('Could not load shared showcase samples:', error);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Restore the server-side session and take authenticated users back to
   // their workspace after a full page reload.
