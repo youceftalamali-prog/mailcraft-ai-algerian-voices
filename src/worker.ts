@@ -24,6 +24,23 @@ export default {
   fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const pathname = new URL(request.url).pathname;
 
+    // Runtime diagnostics must reach Express without requiring Hyperdrive.
+    // This keeps the endpoint useful when the database binding is unavailable.
+    if (pathname === '/api/health/runtime') {
+      return (async (): Promise<Response> => {
+        try {
+          return await handleAsNodeRequest(3000, request);
+        } catch (error: unknown) {
+          console.error('Worker runtime health request failed:', {
+            method: request.method,
+            pathname,
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+          return Response.json({ error: 'INTERNAL_SERVER_ERROR' }, { status: 500 });
+        }
+      })();
+    }
+
     // Keep API traffic on Express; serve the Vite SPA through the Assets binding.
     if (pathname === '/api' || pathname.startsWith('/api/')) {
       if (!env.HYPERDRIVE?.connectionString) {
