@@ -3,11 +3,13 @@ import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
+  getDatabasePool,
   getRequestEnvironmentValue,
   getWorkerDatabaseContextStatus,
   runWithRegisteredWorkerDatabaseContext,
   verifyDatabaseConnection,
 } from './src/server/database';
+import { INITIAL_SHOWCASE_SAMPLES } from './src/services/adminStore';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
@@ -799,6 +801,249 @@ app.get('/api/personas', (_req: Request, res: Response): void => {
       lexicalSignatures: p.lexicalSignatureAnchors,
     })),
   });
+});
+
+// ----------------------------------------------------------------------------
+// PUBLIC SHOWCASE AUDIO — samples are stored centrally in PostgreSQL.
+// Visitors receive play-only URLs; the audio endpoint is inline and cacheable.
+// ----------------------------------------------------------------------------
+
+function showcaseSampleFromRow(row: any) {
+  const audioHash = typeof row.audio_sha256 === 'string' ? row.audio_sha256.trim() : '';
+  return {
+    id: row.id,
+    personaId: row.persona_id,
+    title: row.title,
+    category: row.category,
+    personaTitle: row.persona_title,
+    avatarIcon: row.avatar_icon,
+    accentBadge: row.accent_badge,
+    scriptText: row.script_text,
+    durationLabel: row.duration_label,
+    voiceName: row.voice_name,
+    createdAt: row.created_at,
+    isCustomUpload: Boolean(audioHash),
+    ...(audioHash
+      ? { customAudioUrl: \`/api/showcase-samples/\${encodeURIComponent(row.id)}/audio/\${audioHash}\` }
+      : {}),
+  };
+}
+
+async function initializeShowcaseSamplesIfNeeded(): Promise<void> {
+  const client = await getDatabasePool().connect();
+  try {
+    await client.query('BEGIN');
+    const state = await client.query(
+      'SELECT initialized FROM showcase_sample_state WHERE id=1 FOR UPDATE'
+    );
+    if (!state.rows[0]?.initialized) {
+      for (const sample of INITIAL_SHOWCASE_SAMPLES) {
+        await client.query(
+          \`INSERT INTO showcase_audio_samples
+            (id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
+             script_text, duration_label, voice_name, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           ON CONFLICT (id) DO NOTHING\`,
+          [
+            sample.id, sample.personaId, sample.title, sample.category, sample.personaTitle,
+            sample.avatarIcon, sample.accentBadge, sample.scriptText, sample.durationLabel,
+            sample.voiceName, sample.createdAt || new Date().toISOString().slice(0, 10),
+          ],
+        );
+      }
+      await client.query(
+        'UPDATE showcase_sample_state SET initialized=TRUE WHERE id=1'
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Public metadata only. Audio bytes are served separately after the visitor
+// presses Play, so they are not downloaded while merely browsing the page.
+app.get('/api/showcase-samples', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    await initializeShowcaseSamplesIfNeeded();
+    const result = await getDatabasePool().query(
+      \`SELECT id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
+              script_text, duration_label, voice_name, created_at, audio_sha256
+       FROM showcase_audio_samples ORDER BY created_at DESC, id ASC\`,
+    );
+    res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    res.json({ success: true, samples: result.rows.map(showcaseSampleFromRow) });
+  } catch (error) {
+    console.error('Failed to load showcase samples:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(503).json({ success: false, message: 'تعذر تحميل نماذج الأصوات حالياً.' });
+  }
+});
+
+// Hashed URLs allow a browser to keep one recording in its HTTP cache and
+// reuse it for repeat plays. Updating the recording creates a different URL.
+app.get('/api/showcase-samples/:id/audio/:hash', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, hash } = req.params;
+    const result = await getDatabasePool().query(
+      'SELECT audio_data, audio_mime_type, audio_sha256 FROM showcase_audio_samples WHERE id=$1',
+      [id],
+    );
+    const row = result.rows[0];
+    if (!row || !row.audio_data || row.audio_sha256 !== hash) {
+      res.status(404).json({ message: 'التسجيل الصوتي غير موجود.' });
+      return;
+    }
+
+    const etag = \`"\${hash}"\`;
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('ETag', etag);
+    res.setHeader('Content-Type', row.audio_mime_type || 'audio/mpeg');
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Accept-Ranges', 'none');
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
+    const audio = Buffer.isBuffer(row.audio_data) ? row.audio_data : Buffer.from(row.audio_data);
+    res.status(200).send(audio);
+  } catch (error) {
+    console.error('Failed to stream showcase audio:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(503).json({ message: 'تعذر تشغيل التسجيل الصوتي حالياً.' });
+  }
+});
+
+// Admin-only metadata synchronization. Audio blobs are uploaded separately as
+// binary data so the JSON payload remains small and no data URLs are saved.
+app.put('/api/admin/showcase-samples', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const samples = req.body?.samples;
+  if (!Array.isArray(samples) || samples.length > 50) {
+    res.status(400).json({ message: 'قائمة العينات غير صالحة.' });
+    return;
+  }
+
+  const normalized: any[] = [];
+  const seen = new Set<string>();
+  for (const sample of samples) {
+    if (!sample || typeof sample !== 'object') {
+      res.status(400).json({ message: 'بيانات إحدى العينات غير صالحة.' });
+      return;
+    }
+    const fields = [
+      ['id', 100], ['title', 180], ['category', 120], ['personaTitle', 120],
+      ['avatarIcon', 20], ['accentBadge', 180], ['scriptText', 5000],
+      ['durationLabel', 40], ['voiceName', 40], ['personaId', 60],
+    ] as const;
+    for (const [field, maxLength] of fields) {
+      if (typeof sample[field] !== 'string' || !sample[field].trim() || sample[field].length > maxLength) {
+        res.status(400).json({ message: \`قيمة غير صالحة في الحقل \${field}.\` });
+        return;
+      }
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(sample.id) || seen.has(sample.id) ||
+        !Object.prototype.hasOwnProperty.call(ALGIERS_PERSONA_REGISTRY, sample.personaId)) {
+      res.status(400).json({ message: 'معرّف العينة أو الشخصية الصوتية غير صالح.' });
+      return;
+    }
+    seen.add(sample.id);
+    normalized.push(sample);
+  }
+
+  const client = await getDatabasePool().connect();
+  try {
+    await client.query('BEGIN');
+    if (normalized.length === 0) {
+      await client.query('DELETE FROM showcase_audio_samples');
+    } else {
+      await client.query(
+        'DELETE FROM showcase_audio_samples WHERE NOT (id = ANY($1::text[]))',
+        [normalized.map((sample) => sample.id)],
+      );
+    }
+    for (const sample of normalized) {
+      await client.query(
+        \`INSERT INTO showcase_audio_samples
+          (id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
+           script_text, duration_label, voice_name, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (id) DO UPDATE SET
+           persona_id=EXCLUDED.persona_id, title=EXCLUDED.title, category=EXCLUDED.category,
+           persona_title=EXCLUDED.persona_title, avatar_icon=EXCLUDED.avatar_icon,
+           accent_badge=EXCLUDED.accent_badge, script_text=EXCLUDED.script_text,
+           duration_label=EXCLUDED.duration_label, voice_name=EXCLUDED.voice_name,
+           created_at=EXCLUDED.created_at, updated_at=NOW()\`,
+        [
+          sample.id, sample.personaId, sample.title, sample.category, sample.personaTitle,
+          sample.avatarIcon, sample.accentBadge, sample.scriptText, sample.durationLabel,
+          sample.voiceName, typeof sample.createdAt === 'string' ? sample.createdAt : new Date().toISOString().slice(0, 10),
+        ],
+      );
+    }
+    await client.query('UPDATE showcase_sample_state SET initialized=TRUE WHERE id=1');
+    await client.query('COMMIT');
+    res.json({ success: true, count: normalized.length });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to save admin showcase samples:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(500).json({ message: 'تعذر حفظ نماذج الأصوات.' });
+  } finally {
+    client.release();
+  }
+});
+
+// Admin uploads only the actual selected/generated recording. A 5 MB cap
+// keeps the upload bounded while allowing short WAV and MP3 showcases.
+app.put('/api/admin/showcase-samples/:id/audio', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+    res.status(400).json({ message: 'معرّف العينة غير صالح.' });
+    return;
+  }
+
+  const contentTypeHeader = req.headers['content-type'];
+  const mimeType = (typeof contentTypeHeader === 'string' ? contentTypeHeader : '').split(';')[0].trim().toLowerCase();
+  const allowedMimeTypes = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/mp4', 'audio/aac']);
+  if (!allowedMimeTypes.has(mimeType)) {
+    res.status(415).json({ message: 'صيغة الملف غير مدعومة. استخدم MP3 أو WAV أو OGG أو WEBM.' });
+    return;
+  }
+
+  try {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    for await (const chunk of req) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.byteLength;
+      if (totalBytes > 5 * 1024 * 1024) {
+        res.status(413).json({ message: 'حجم التسجيل يتجاوز 5 ميغابايت.' });
+        return;
+      }
+      chunks.push(buffer);
+    }
+    if (totalBytes === 0) {
+      res.status(400).json({ message: 'ملف الصوت فارغ.' });
+      return;
+    }
+    const audio = Buffer.concat(chunks);
+    const audioHash = crypto.createHash('sha256').update(audio).digest('hex');
+    const updated = await getDatabasePool().query(
+      \`UPDATE showcase_audio_samples
+       SET audio_data=$1, audio_mime_type=$2, audio_sha256=$3, updated_at=NOW()
+       WHERE id=$4 RETURNING id\`,
+      [audio, mimeType, audioHash, id],
+    );
+    if (!updated.rowCount) {
+      res.status(404).json({ message: 'العينة غير موجودة. احفظ بياناتها أولاً.' });
+      return;
+    }
+    res.json({ success: true, audioUrl: \`/api/showcase-samples/\${encodeURIComponent(id)}/audio/\${audioHash}\` });
+  } catch (error) {
+    console.error('Failed to upload showcase audio:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(500).json({ message: 'تعذر حفظ ملف الصوت.' });
+  }
 });
 
 // Endpoint: Admin Test & Verify Gemini API Key / Model Connection (Protected by requireAdmin)
