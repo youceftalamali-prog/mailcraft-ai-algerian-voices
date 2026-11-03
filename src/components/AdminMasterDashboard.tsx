@@ -346,6 +346,16 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   const handleAudioFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setSampleActionToast('حجم ملف الصوت يجب ألا يتجاوز 5 ميغابايت.');
+      e.target.value = '';
+      return;
+    }
+    if (!file.type.startsWith('audio/')) {
+      setSampleActionToast('الرجاء اختيار ملف صوتي بصيغة MP3 أو WAV أو OGG أو WEBM.');
+      e.target.value = '';
+      return;
+    }
 
     setUploadedFileName(file.name);
     const reader = new FileReader();
