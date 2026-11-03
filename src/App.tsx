@@ -40,26 +40,40 @@ export default function App() {
     loadAdminShowcaseSamples()
   );
 
-  // Synchronize server-side session on mount
+  // Restore the server-side session and take authenticated users back to
+  // their workspace after a full page reload.
   React.useEffect(() => {
-    fetch('/api/auth/me')
-      .then((res) => res.json() as Promise<SessionResponse>)
+    fetch('/api/auth/me', { credentials: 'same-origin' })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Session check failed: ${res.status}`);
+        return res.json() as Promise<SessionResponse>;
+      })
       .then((data) => {
         if (data.authenticated && data.user) {
           setCurrentUserEmail(data.user.email);
           setCurrentUserRole(data.user.role);
+          setActiveTab(data.user.role === 'admin' ? 'admin' : 'persona_studio');
           try {
             localStorage.setItem('dz_user_email', data.user.email);
           } catch {}
         } else {
           setCurrentUserEmail(null);
           setCurrentUserRole(null);
+          setActiveTab('landing');
           try {
             localStorage.removeItem('dz_user_email');
           } catch {}
         }
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        console.warn('Server session restore failed:', error);
+        setCurrentUserEmail(null);
+        setCurrentUserRole(null);
+        setActiveTab('landing');
+        try {
+          localStorage.removeItem('dz_user_email');
+        } catch {}
+      });
   }, []);
 
   // Synchronize samples state across views in real-time

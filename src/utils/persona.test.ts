@@ -4,6 +4,7 @@ import {
   ALGIERS_PERSONA_REGISTRY,
   resolvePersonaEmotionConflict,
   buildPersonaStylePrompt,
+  generatePersonaSpeech,
 } from '../services/algerianPersonaVoiceService.ts';
 
 test('ALGIERS_PERSONA_REGISTRY contains all 7 required preset profiles', () => {
@@ -59,4 +60,22 @@ test('buildPersonaStylePrompt includes persona modeling, resolved emotion, and n
   assert.ok(prompt.includes('دابا'), 'Must forbid Moroccan token دابا');
   assert.ok(prompt.includes('Zephyr'), 'Must use Zephyr base voice');
   assert.ok(prompt.includes('Sweet, tender'), 'Must include persona vocal texture');
+});
+
+
+test('generatePersonaSpeech marks synthesized placeholder audio as fallback', async () => {
+  const fakeAi = {
+    models: {
+      generateContent: async () => ({ candidates: [] }),
+    },
+  } as any;
+
+  const result = await generatePersonaSpeech(fakeAi, {
+    scriptText: 'هذا نص تجريبي لاختبار تمييز الصوت الاحتياطي.',
+    persona: 'zephyr_warm',
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.fallbackUsed, true);
+  assert.match(result.audioDataUrl, /^data:audio\/wav;base64,/);
 });

@@ -4,6 +4,7 @@ import {
   ADMIN_EMAIL, hashPassword, verifyPassword, checkGenerationAllowance,
   initializeAuthStore, createUser, authenticateUser, getUserByEmail,
   createSession, getSession, destroySession, registerOrGetUser,
+  incrementGenerationUsage, refundGenerationUsage,
 } from '../server/security.js';
 
 describe('Authentication primitives', () => {
@@ -61,5 +62,21 @@ describe('Neon PostgreSQL authentication integration', () => {
     const admin = await registerOrGetUser(ADMIN_EMAIL, 'admin');
     assert.equal(admin.role, 'admin');
     assert.equal(admin.email.toLowerCase(), ADMIN_EMAIL.toLowerCase());
+  });
+
+  test('failed generation reservation can be refunded without going below zero', { skip }, async () => {
+    await initializeAuthStore();
+    const email = `refund-test-${Date.now()}@example.test`;
+    const user = await createUser(email, 'Correct-Horse-Battery-2026!');
+
+    await incrementGenerationUsage(user);
+    assert.equal((await getUserByEmail(email))?.trialGenerationsUsed, 1);
+
+    await refundGenerationUsage(user.id, user.plan);
+    assert.equal((await getUserByEmail(email))?.trialGenerationsUsed, 0);
+
+    // A duplicate refund must never produce a negative generation count.
+    await refundGenerationUsage(user.id, user.plan);
+    assert.equal((await getUserByEmail(email))?.trialGenerationsUsed, 0);
   });
 });

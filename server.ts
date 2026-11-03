@@ -1,6 +1,6 @@
 import express from 'express';
 import crypto from 'node:crypto';
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
   getRequestEnvironmentValue,
@@ -12,6 +12,7 @@ import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoice
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
 import {
+  initializeAuthStore,
   authMiddleware,
   requireAuth,
   requireAdmin,
@@ -27,6 +28,7 @@ import {
   authenticateUser,
   setUserPassword,
   getUserByEmail,
+  updateUser,
   consumeGenerationAllowance,
   getAllUsers,
   ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
@@ -102,7 +104,49 @@ app.use('/api', (_req: Request, res: Response, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   next();
 });
-app.use(authMiddleware);
+
+// Initialize persistent authentication tables before authMiddleware attempts to
+// read a session. Keep one promise per isolate, and clear it after failure so a
+// transient Hyperdrive/PostgreSQL outage can be retried by the next request.
+let authStoreInitialization: Promise<void> | null = null;
+app.use(async (req: Request, res: Response, next: NextFunction) => {
+  // This diagnostic endpoint must remain independent of database/auth bootstrap.
+  if (req.path === '/api/health/runtime') {
+    next();
+    return;
+  }
+  if (req.path !== '/api' && !req.path.startsWith('/api/')) {
+    next();
+    return;
+  }
+
+  try {
+    if (!authStoreInitialization) {
+      authStoreInitialization = initializeAuthStore().catch((error: unknown) => {
+        authStoreInitialization = null;
+        throw error;
+      });
+    }
+    await authStoreInitialization;
+    next();
+  } catch (error) {
+    console.error('Auth store initialization failed:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(503).json({
+      error: 'AUTH_STORE_UNAVAILABLE',
+      message: 'Authentication storage is temporarily unavailable. Please try again shortly.',
+    });
+  }
+});
+
+// The runtime diagnostic must not query session tables, even if the browser
+// sends an existing authentication cookie.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path === '/api/health/runtime') {
+    next();
+    return;
+  }
+  authMiddleware(req, res, next);
+});
 
 // Rate Limiters for Security
 const authLimiter = rateLimiter({
@@ -233,6 +277,14 @@ app.post('/api/auth/admin-login', authLimiter, async (req: Request, res: Respons
 
   let adminUser = await getUserByEmail(SECURITY_ADMIN_EMAIL);
   if (!adminUser) adminUser = await registerOrGetUser(SECURITY_ADMIN_EMAIL, 'admin');
+  // The owner email alone never grants admin rights. After the deployment secret
+  // has been verified above, enforce the canonical owner role on legacy rows.
+  const promotedAdmin = await updateUser(adminUser.id, { role: 'admin', plan: 'business' });
+  if (!promotedAdmin) {
+    res.status(500).json({ error: 'ADMIN_ACCOUNT_UPDATE_FAILED', message: 'تعذر تحديث صلاحيات حساب المالك.' });
+    return;
+  }
+  adminUser = promotedAdmin;
   // Rotate any legacy seeded/default hash to the configured deployment secret.
   if (!adminUser.passwordHash || !adminUser.salt || !verifyPassword(password, adminUser.salt, adminUser.passwordHash)) {
     adminUser = (await setUserPassword(adminUser.id, configuredSecret)) || adminUser;
@@ -1288,3 +1340,18 @@ With this new solution, you eliminate tedious guesswork and move straight to hig
 }
 
 // Express application is exported for the local Node bootstrap and Cloudflare Worker adapter.
+
+// Keep API failures JSON-shaped under both Node and Cloudflare Worker runtimes.
+app.use((error: unknown, req: Request, res: Response, next: NextFunction): void => {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+  if (req.path === '/api' || req.path.startsWith('/api/')) {
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    console.error('Unhandled API error:', { path: req.path, method: req.method, errorName });
+    res.status(500).json({ error: 'INTERNAL_SERVER_ERROR' });
+    return;
+  }
+  next(error);
+});
