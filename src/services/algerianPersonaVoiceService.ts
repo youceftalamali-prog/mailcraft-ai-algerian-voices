@@ -432,8 +432,10 @@ export async function generatePersonaSpeech(
     }
   }
 
-  // If live TTS quota exceeded or failed, synthesize harmonic persona fallback WAV
-  if (!audioDataUrl) {
+  // Keep the existing fallback behavior for generation callers, but mark it
+  // explicitly so showcase editors never save a synthetic placeholder as speech.
+  const fallbackUsed = !audioDataUrl;
+  if (fallbackUsed) {
     audioDataUrl = createPersonaFallbackWav(persona.id, durationEstimate);
   }
 
@@ -455,7 +457,7 @@ export async function generatePersonaSpeech(
     voiceUsed: persona.recommendedVoice || 'Zephyr',
     stylePromptApplied: stylePrompt,
     quotaExceeded,
-    fallbackUsed: !audioDataUrl.startsWith('data:audio/wav;base64,UklGR'), // RIFF check
+    fallbackUsed,
     quotaMessage: quotaExceeded
       ? 'تم استهلاك الحصة اليومية المجانية لـ Gemini TTS (10 طلبات/يوم). تم تفعيل المشغل التوليدي الاحتياطي بنجاح.'
       : undefined,
