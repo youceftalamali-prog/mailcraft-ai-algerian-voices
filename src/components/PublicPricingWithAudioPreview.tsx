@@ -3,7 +3,6 @@ import {
   Mic,
   Play,
   Pause,
-  Download,
   Sparkles,
   Volume2,
   ShieldCheck,
@@ -35,9 +34,8 @@ import {
 import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';
 import {
   ShowcaseAudioSample,
-  loadAdminShowcaseSamples,
+  INITIAL_SHOWCASE_SAMPLES,
   isAdminUser,
-  SAMPLES_UPDATED_EVENT,
 } from '../services/adminStore';
 
 type AuthResponse = {
@@ -160,34 +158,23 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
   // Billing cycle toggle: monthly vs annual
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
 
-  // Resolved dynamic active samples with instant live synchronization
+  // Samples are loaded from the shared server state by App, never from visitor localStorage.
   const [liveSamples, setLiveSamples] = useState<ShowcaseAudioSample[]>(() =>
-    showcaseSamples || loadAdminShowcaseSamples()
+    showcaseSamples || INITIAL_SHOWCASE_SAMPLES
   );
 
   useEffect(() => {
-    if (showcaseSamples) {
-      setLiveSamples(showcaseSamples);
-    }
+    if (showcaseSamples) setLiveSamples(showcaseSamples);
   }, [showcaseSamples]);
-
-  useEffect(() => {
-    const handleSync = (e: Event) => {
-      const customEvent = e as CustomEvent<ShowcaseAudioSample[]>;
-      if (customEvent.detail && Array.isArray(customEvent.detail)) {
-        setLiveSamples(customEvent.detail);
-      }
-    };
-    window.addEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-    return () => window.removeEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-  }, []);
 
   const activeSamples = liveSamples;
 
-  // Showcase Samples playback state
+  // Keep one HTMLAudioElement per immutable recording URL. Repeat plays reuse
+  // the same element and the browser's HTTP cache instead of fetching the file again.
   const [activePlayingSampleId, setActivePlayingSampleId] = useState<string | null>(null);
   const [sampleAudioProgress, setSampleAudioProgress] = useState<number>(0);
   const sampleAudioRef = useRef<HTMLAudioElement | null>(null);
+  const sampleAudioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   // Auth Modal & Form State
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('signup');
@@ -206,9 +193,9 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
   // Clean up audio on unmount
   useEffect(() => {
     return () => {
-      if (sampleAudioRef.current) {
-        sampleAudioRef.current.pause();
-      }
+      if (sampleAudioRef.current) sampleAudioRef.current.pause();
+      sampleAudioCacheRef.current.forEach((audio) => audio.pause());
+      sampleAudioCacheRef.current.clear();
       stopAdSpeech();
     };
   }, []);
@@ -248,7 +235,14 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
       return;
     }
 
-    const audio = new Audio(sample.customAudioUrl);
+    const audioCache = sampleAudioCacheRef.current;
+    let audio = audioCache.get(sample.customAudioUrl);
+    if (!audio) {
+      audio = new Audio(sample.customAudioUrl);
+      audio.preload = 'none';
+      audioCache.set(sample.customAudioUrl, audio);
+    }
+    audio.currentTime = 0;
     sampleAudioRef.current = audio;
     let speechFallbackStarted = false;
     const fallbackToScriptSpeech = () => {
