@@ -255,6 +255,14 @@ export async function incrementGenerationUsage(user?: ServerUser): Promise<void>
   const field = user.plan === 'free' ? 'trial_generations_used' : 'monthly_generations_used';
   await getDatabasePool().query(`UPDATE app_users SET ${field}=${field}+1 WHERE id=$1`, [user.id]);
 }
+
+export async function refundGenerationUsage(userId: string, plan: ServerUser['plan']): Promise<void> {
+  const field = plan === 'free' ? 'trial_generations_used' : 'monthly_generations_used';
+  await getDatabasePool().query(
+    `UPDATE app_users SET ${field}=GREATEST(${field}-1,0) WHERE id=$1`,
+    [userId],
+  );
+}
 export function consumeGenerationAllowance(_req: Request, res: Response, next: NextFunction): void {
   const user = _req.user;
   if (!user) { res.status(401).json({ error: 'UNAUTHORIZED' }); return; }
@@ -279,15 +287,34 @@ export function consumeGenerationAllowance(_req: Request, res: Response, next: N
       }
       await client.query('COMMIT');
 
-      // A generation is charged only when the endpoint succeeds. Validation or
-      // provider failures return the reserved credit to the same usage bucket.
+      // A generation is charged only when the endpoint succeeds. For JSON error
+      // responses, await the refund before sending the response. A detached
+      // "finish" callback can be cut short when a Cloudflare Worker completes
+      // the request, leaving failed provider calls incorrectly charged.
       if (current.role !== 'admin') {
-        const reservedColumn = current.plan === 'free' ? 'trial_generations_used' : 'monthly_generations_used';
+        let refundPromise: Promise<void> | null = null;
+        const refundReservation = (): Promise<void> => {
+          if (!refundPromise) {
+            refundPromise = refundGenerationUsage(current.id, current.plan).catch((refundError) => {
+              console.error('Failed to refund generation credit:', refundError);
+            });
+          }
+          return refundPromise;
+        };
+
+        const sendJson = res.json.bind(res);
+        res.json = ((body?: unknown) => {
+          if (res.statusCode >= 400) {
+            void refundReservation().then(() => sendJson(body));
+            return res;
+          }
+          return sendJson(body);
+        }) as Response['json'];
+
+        // Keep a fallback for non-JSON error responses. The same promise makes
+        // this idempotent when the JSON path has already started the refund.
         res.once('finish', () => {
-          if (res.statusCode < 400) return;
-          void getDatabasePool()
-            .query(`UPDATE app_users SET ${reservedColumn}=GREATEST(${reservedColumn}-1,0) WHERE id=$1`, [current.id])
-            .catch((refundError) => console.error('Failed to refund generation credit:', refundError));
+          if (res.statusCode >= 400) void refundReservation();
         });
       }
       next();
