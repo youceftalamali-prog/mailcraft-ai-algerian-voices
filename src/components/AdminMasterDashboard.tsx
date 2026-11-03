@@ -459,7 +459,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       });
 
       const data = await res.json() as AudioGenerationResponse;
-      if (!res.ok || !data.audioDataUrl) {
+      if (!res.ok || !data.audioDataUrl || data.fallbackUsed) {
         throw new Error(data.details || data.message || data.error || `TTS request failed: ${res.status}`);
       }
       setEditSampleAudioUrl(data.audioDataUrl);
