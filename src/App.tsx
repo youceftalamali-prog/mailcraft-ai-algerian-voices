@@ -95,17 +95,6 @@ export default function App() {
       });
   }, []);
 
-  // Synchronize samples state across views in real-time
-  React.useEffect(() => {
-    const handleSync = (e: Event) => {
-      const customEvent = e as CustomEvent<ShowcaseAudioSample[]>;
-      if (customEvent.detail && Array.isArray(customEvent.detail)) {
-        setShowcaseSamples(customEvent.detail);
-      }
-    };
-    window.addEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-    return () => window.removeEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-  }, []);
   const [campaign, setCampaign] = useState<EmailCampaign>(() =>
     generateDefaultCampaign('SaaS Product Launch with 30% Lifetime Discount')
   );
