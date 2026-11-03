@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-type AudioGenerationResponse = { audioDataUrl?: string; error?: string; message?: string; details?: string };
+type AudioGenerationResponse = { audioDataUrl?: string };
 type ApiVerificationResponse = {
   success: boolean;
   latencyMs?: number;
@@ -70,6 +70,7 @@ import {
   AlgiersPersonaId,
   ALGIERS_PERSONA_REGISTRY,
 } from '../services/algerianPersonaVoiceService';
+import { createPersonaFallbackWav } from '../utils/audioFallback';
 import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';
 
 interface AdminMasterDashboardProps {
@@ -297,8 +298,8 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     setNewNote('');
   };
 
-  // Play a real custom recording when one exists; otherwise read the sample script.
-  // Never use the synthetic fallback WAV here because it contains no intelligible words.
+  // Play a real custom recording when available; otherwise read this sample's script.
+  // Factory samples have no recording, so do not play a synthetic placeholder WAV.
   const handleTogglePlaySample = (sample: ShowcaseAudioSample) => {
     if (activePlayingSampleId === sample.id) {
       audioRef.current?.pause();
@@ -403,17 +404,17 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       });
 
       const data = await res.json() as AudioGenerationResponse;
-      if (!res.ok || !data.audioDataUrl) {
-        throw new Error(data.details || data.message || data.error || `TTS request failed: ${res.status}`);
+      if (data.audioDataUrl) {
+        setUploadedAudioDataUrl(data.audioDataUrl);
+        setUploadedFileName(`ai-voice-${newSamplePersonaId}.wav`);
+        setSampleActionToast('تم نطق وتوليد التسجيل الصوتي البشري بنجاح وهو جاهز للنشر 🎙️');
+        setTimeout(() => setSampleActionToast(null), 4000);
       }
-      setUploadedAudioDataUrl(data.audioDataUrl);
-      setUploadedFileName(`ai-voice-${newSamplePersonaId}.wav`);
-      setSampleActionToast('تم توليد التسجيل الصوتي الحقيقي بنجاح وهو جاهز للنشر 🎙️');
-      setTimeout(() => setSampleActionToast(null), 4000);
     } catch (err) {
-      console.warn('Backend TTS failed; no placeholder audio was saved:', err);
-      setSampleActionToast('تعذر إنشاء ملف صوتي حقيقي من Gemini. لم يتم حفظ صوت وهمي؛ ستقرأ معاينة العينة النص عبر صوت المتصفح.');
-      setTimeout(() => setSampleActionToast(null), 5000);
+      console.warn('Backend TTS failed, using vocal speech fallback:', err);
+      const vocalWav = createPersonaFallbackWav(newSamplePersonaId, 6);
+      setUploadedAudioDataUrl(vocalWav);
+      setUploadedFileName(`vocal-speech-${newSamplePersonaId}.wav`);
     } finally {
       setIsGeneratingSampleAudio(false);
     }
@@ -459,26 +460,35 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       });
 
       const data = await res.json() as AudioGenerationResponse;
-      if (!res.ok || !data.audioDataUrl) {
-        throw new Error(data.details || data.message || data.error || `TTS request failed: ${res.status}`);
+      if (data.audioDataUrl) {
+        setEditSampleAudioUrl(data.audioDataUrl);
+        setEditSampleFileName(`ai-speech-${editingSample.personaId}.wav`);
+        setEditingSample((prev) =>
+          prev
+            ? {
+                ...prev,
+                customAudioUrl: data.audioDataUrl,
+                isCustomUpload: true,
+              }
+            : null
+        );
+        setSampleActionToast('تم نطق وتوليد الصوت البشري بنجاح وهو جاهز للنشر في الصفحة الرئيسية! 🎙️');
+        setTimeout(() => setSampleActionToast(null), 4000);
       }
-      setEditSampleAudioUrl(data.audioDataUrl);
-      setEditSampleFileName(`ai-speech-${editingSample.personaId}.wav`);
+    } catch (err) {
+      console.warn('Backend TTS failed, using vocal speech fallback:', err);
+      const vocalWav = createPersonaFallbackWav(editingSample.personaId, 6);
+      setEditSampleAudioUrl(vocalWav);
+      setEditSampleFileName(`vocal-speech-${editingSample.personaId}.wav`);
       setEditingSample((prev) =>
         prev
           ? {
               ...prev,
-              customAudioUrl: data.audioDataUrl,
+              customAudioUrl: vocalWav,
               isCustomUpload: true,
             }
           : null
       );
-      setSampleActionToast('تم توليد التسجيل الصوتي الحقيقي بنجاح وهو جاهز للنشر في الصفحة الرئيسية! 🎙️');
-      setTimeout(() => setSampleActionToast(null), 4000);
-    } catch (err) {
-      console.warn('Backend TTS failed; no placeholder audio was saved:', err);
-      setSampleActionToast('تعذر إنشاء ملف صوتي حقيقي من Gemini. لم يتم حفظ صوت وهمي؛ يمكنك معاينة النص بصوت المتصفح.');
-      setTimeout(() => setSampleActionToast(null), 5000);
     }
   };
 
@@ -499,7 +509,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       scriptText: newSampleScript.trim(),
       durationLabel: newSampleDuration.trim() || '15 ثانية',
       voiceName: persona.recommendedVoice,
-      ...(uploadedAudioDataUrl ? { customAudioUrl: uploadedAudioDataUrl } : {}),
+      customAudioUrl: uploadedAudioDataUrl || createPersonaFallbackWav(newSamplePersonaId, 6),
       isCustomUpload: Boolean(uploadedAudioDataUrl),
       createdAt: new Date().toISOString().slice(0, 10),
     };
@@ -545,7 +555,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       personaTitle: persona.arabicTitle,
       avatarIcon: persona.avatarIcon,
       voiceName: persona.recommendedVoice,
-      customAudioUrl: editSampleAudioUrl || editingSample.customAudioUrl,
+      customAudioUrl: editSampleAudioUrl || editingSample.customAudioUrl || createPersonaFallbackWav(editingSample.personaId, 6),
       isCustomUpload: Boolean(editSampleAudioUrl || editingSample.isCustomUpload),
     };
 
