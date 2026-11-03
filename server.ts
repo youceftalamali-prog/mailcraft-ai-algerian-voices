@@ -824,7 +824,7 @@ function showcaseSampleFromRow(row: any) {
     createdAt: row.created_at,
     isCustomUpload: Boolean(audioHash),
     ...(audioHash
-      ? { customAudioUrl: \`/api/showcase-samples/\${encodeURIComponent(row.id)}/audio/\${audioHash}\` }
+      ? { customAudioUrl: `/api/showcase-samples/${encodeURIComponent(row.id)}/audio/${audioHash}` }
       : {}),
   };
 }
@@ -839,11 +839,11 @@ async function initializeShowcaseSamplesIfNeeded(): Promise<void> {
     if (!state.rows[0]?.initialized) {
       for (const sample of INITIAL_SHOWCASE_SAMPLES) {
         await client.query(
-          \`INSERT INTO showcase_audio_samples
+          `INSERT INTO showcase_audio_samples
             (id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
              script_text, duration_label, voice_name, created_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-           ON CONFLICT (id) DO NOTHING\`,
+           ON CONFLICT (id) DO NOTHING`,
           [
             sample.id, sample.personaId, sample.title, sample.category, sample.personaTitle,
             sample.avatarIcon, sample.accentBadge, sample.scriptText, sample.durationLabel,
@@ -870,9 +870,9 @@ app.get('/api/showcase-samples', async (_req: Request, res: Response): Promise<v
   try {
     await initializeShowcaseSamplesIfNeeded();
     const result = await getDatabasePool().query(
-      \`SELECT id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
+      `SELECT id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
               script_text, duration_label, voice_name, created_at, audio_sha256
-       FROM showcase_audio_samples ORDER BY created_at DESC, id ASC\`,
+       FROM showcase_audio_samples ORDER BY created_at DESC, id ASC`,
     );
     res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     res.json({ success: true, samples: result.rows.map(showcaseSampleFromRow) });
@@ -897,7 +897,7 @@ app.get('/api/showcase-samples/:id/audio/:hash', async (req: Request, res: Respo
       return;
     }
 
-    const etag = \`"\${hash}"\`;
+    const etag = `"${hash}"`;
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.setHeader('ETag', etag);
     res.setHeader('Content-Type', row.audio_mime_type || 'audio/mpeg');
@@ -939,7 +939,7 @@ app.put('/api/admin/showcase-samples', adminLimiter, requireAdmin, async (req: R
     ] as const;
     for (const [field, maxLength] of fields) {
       if (typeof sample[field] !== 'string' || !sample[field].trim() || sample[field].length > maxLength) {
-        res.status(400).json({ message: \`قيمة غير صالحة في الحقل \${field}.\` });
+        res.status(400).json({ message: `قيمة غير صالحة في الحقل ${field}.` });
         return;
       }
     }
@@ -965,7 +965,7 @@ app.put('/api/admin/showcase-samples', adminLimiter, requireAdmin, async (req: R
     }
     for (const sample of normalized) {
       await client.query(
-        \`INSERT INTO showcase_audio_samples
+        `INSERT INTO showcase_audio_samples
           (id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
            script_text, duration_label, voice_name, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -974,7 +974,7 @@ app.put('/api/admin/showcase-samples', adminLimiter, requireAdmin, async (req: R
            persona_title=EXCLUDED.persona_title, avatar_icon=EXCLUDED.avatar_icon,
            accent_badge=EXCLUDED.accent_badge, script_text=EXCLUDED.script_text,
            duration_label=EXCLUDED.duration_label, voice_name=EXCLUDED.voice_name,
-           created_at=EXCLUDED.created_at, updated_at=NOW()\`,
+           created_at=EXCLUDED.created_at, updated_at=NOW()`,
         [
           sample.id, sample.personaId, sample.title, sample.category, sample.personaTitle,
           sample.avatarIcon, sample.accentBadge, sample.scriptText, sample.durationLabel,
@@ -1030,16 +1030,16 @@ app.put('/api/admin/showcase-samples/:id/audio', adminLimiter, requireAdmin, asy
     const audio = Buffer.concat(chunks);
     const audioHash = crypto.createHash('sha256').update(audio).digest('hex');
     const updated = await getDatabasePool().query(
-      \`UPDATE showcase_audio_samples
+      `UPDATE showcase_audio_samples
        SET audio_data=$1, audio_mime_type=$2, audio_sha256=$3, updated_at=NOW()
-       WHERE id=$4 RETURNING id\`,
+       WHERE id=$4 RETURNING id`,
       [audio, mimeType, audioHash, id],
     );
     if (!updated.rowCount) {
       res.status(404).json({ message: 'العينة غير موجودة. احفظ بياناتها أولاً.' });
       return;
     }
-    res.json({ success: true, audioUrl: \`/api/showcase-samples/\${encodeURIComponent(id)}/audio/\${audioHash}\` });
+    res.json({ success: true, audioUrl: `/api/showcase-samples/${encodeURIComponent(id)}/audio/${audioHash}` });
   } catch (error) {
     console.error('Failed to upload showcase audio:', error instanceof Error ? error.name : 'UnknownError');
     res.status(500).json({ message: 'تعذر حفظ ملف الصوت.' });
