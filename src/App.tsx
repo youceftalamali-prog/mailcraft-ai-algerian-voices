@@ -39,6 +39,7 @@ export default function App() {
   const [showcaseSamples, setShowcaseSamples] = useState<ShowcaseAudioSample[]>(() =>
     INITIAL_SHOWCASE_SAMPLES
   );
+  const [showcaseSamplesReady, setShowcaseSamplesReady] = useState(false);
 
   // Showcase samples are shared server data, not per-browser localStorage.
   React.useEffect(() => {
@@ -49,6 +50,9 @@ export default function App() {
       })
       .catch((error: unknown) => {
         console.warn('Could not load shared showcase samples:', error);
+      })
+      .finally(() => {
+        if (active) setShowcaseSamplesReady(true);
       });
     return () => {
       active = false;
@@ -461,7 +465,11 @@ export default function App() {
 
         {/* Tab 5: Admin Master Dashboard & Settings Protected by Strict Admin Guard */}
         {activeTab === 'admin' && (
-          isAdmin ? (
+          !showcaseSamplesReady ? (
+            <div className="max-w-2xl mx-auto py-16 text-center text-sm text-slate-300" dir="rtl">
+              جاري تحميل العينات الصوتية المحفوظة...
+            </div>
+          ) : isAdmin ? (
             <AdminMasterDashboard
               onNavigateToLanding={() => setActiveTab('landing')}
               onNavigateToStudio={() => setActiveTab('persona_studio')}
