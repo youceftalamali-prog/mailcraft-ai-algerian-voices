@@ -243,7 +243,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
       });
     };
 
-    if (!sample.customAudioUrl) {
+    if (!sample.isCustomUpload || !sample.customAudioUrl) {
       speakSampleText();
       return;
     }
