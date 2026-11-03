@@ -60,6 +60,35 @@ async function createAuthStoreSchema(): Promise<void> {
       )`);
     await client.query('CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id)');
     await client.query('CREATE INDEX IF NOT EXISTS app_sessions_expires_at_idx ON app_sessions(expires_at)');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS showcase_audio_samples (
+        id TEXT PRIMARY KEY,
+        persona_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL,
+        persona_title TEXT NOT NULL,
+        avatar_icon TEXT NOT NULL,
+        accent_badge TEXT NOT NULL,
+        script_text TEXT NOT NULL,
+        duration_label TEXT NOT NULL,
+        voice_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        audio_data BYTEA,
+        audio_mime_type TEXT,
+        audio_sha256 TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS showcase_sample_state (
+        id SMALLINT PRIMARY KEY CHECK (id = 1),
+        initialized BOOLEAN NOT NULL DEFAULT FALSE
+      )`);
+    await client.query(`
+      INSERT INTO showcase_sample_state (id, initialized)
+      VALUES (1, FALSE)
+      ON CONFLICT (id) DO NOTHING
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS showcase_audio_samples_created_at_idx ON showcase_audio_samples(created_at DESC)');
     await client.query('DELETE FROM app_sessions WHERE expires_at <= NOW()');
     await client.query('COMMIT');
   } catch (error) {
