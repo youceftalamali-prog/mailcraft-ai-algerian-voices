@@ -55,8 +55,6 @@ import {
   AdminAISettings,
   loadAdminSubscriptions,
   saveAdminSubscriptions,
-  loadAdminShowcaseSamples,
-  saveAdminShowcaseSamples,
   loadAdminAISettings,
   saveAdminAISettings,
   INITIAL_SUBSCRIPTIONS,
@@ -64,8 +62,8 @@ import {
   INITIAL_AI_SETTINGS,
   ADMIN_EMAIL,
   isAdminUser,
-  SAMPLES_UPDATED_EVENT,
 } from '../services/adminStore';
+import { saveShowcaseSamplesToServer } from '../services/showcaseSamplesApi';
 import {
   AlgiersPersonaId,
   ALGIERS_PERSONA_REGISTRY,
@@ -112,7 +110,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
 
   // Voice Samples State (with live synchronization)
   const [samples, setSamples] = useState<ShowcaseAudioSample[]>(() =>
-    showcaseSamples || loadAdminShowcaseSamples()
+    showcaseSamples || INITIAL_SHOWCASE_SAMPLES
   );
   const [activePlayingSampleId, setActivePlayingSampleId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -172,23 +170,19 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     }
   }, [showcaseSamples]);
 
-  useEffect(() => {
-    const handleSync = (e: Event) => {
-      const customEvent = e as CustomEvent<ShowcaseAudioSample[]>;
-      if (customEvent.detail && Array.isArray(customEvent.detail)) {
-        setSamples(customEvent.detail);
-      }
-    };
-    window.addEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-    return () => window.removeEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-  }, []);
-
-  // Sync showcase samples changes to parent & storage
-  const updateSamplesState = (newSamples: ShowcaseAudioSample[]) => {
-    setSamples(newSamples);
-    saveAdminShowcaseSamples(newSamples);
-    if (onUpdateShowcaseSamples) {
-      onUpdateShowcaseSamples(newSamples);
+  // Save sample metadata and binary audio files to the shared server store.
+  // Browser localStorage is deliberately not used for public showcase content.
+  const updateSamplesState = async (newSamples: ShowcaseAudioSample[]): Promise<boolean> => {
+    try {
+      const savedSamples = await saveShowcaseSamplesToServer(newSamples);
+      setSamples(savedSamples);
+      onUpdateShowcaseSamples?.(savedSamples);
+      return true;
+    } catch (error) {
+      console.error('Failed to save showcase samples:', error);
+      setSampleActionToast(error instanceof Error ? error.message : 'تعذر حفظ العينات الصوتية على الخادم.');
+      setTimeout(() => setSampleActionToast(null), 5000);
+      return false;
     }
   };
 
@@ -483,7 +477,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   };
 
   // Action: Add New Showcase Sample
-  const handleAddNewSample = (e: React.FormEvent) => {
+  const handleAddNewSample = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSampleTitle.trim() || !newSampleScript.trim()) return;
 
@@ -504,7 +498,8 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       createdAt: new Date().toISOString().slice(0, 10),
     };
 
-    updateSamplesState([newSample, ...samples]);
+    const saved = await updateSamplesState([newSample, ...samples]);
+    if (!saved) return;
     setShowAddSampleModal(false);
 
     // Reset Form
@@ -517,7 +512,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   };
 
   // Action: Delete Sample (instant deletion with zero blocking dialogs)
-  const handleDeleteSample = (sampleId: string) => {
+  const handleDeleteSample = async (sampleId: string) => {
     if (activePlayingSampleId === sampleId) {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -528,14 +523,15 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
 
     const target = samples.find((s) => s.id === sampleId);
     const filtered = samples.filter((s) => s.id !== sampleId);
-    updateSamplesState(filtered);
+    const saved = await updateSamplesState(filtered);
+    if (!saved) return;
 
     setSampleActionToast(`تم حذف عينة "${target?.title || 'العينة الصوتية'}" فوراً من لوحة الإدارة والواجهة الرئيسية 🗑️`);
     setTimeout(() => setSampleActionToast(null), 4000);
   };
 
   // Action: Save Edited Sample
-  const handleSaveEditedSample = (e: React.FormEvent) => {
+  const handleSaveEditedSample = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSample) return;
 
@@ -550,7 +546,8 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     };
 
     const updated = samples.map((s) => (s.id === editingSample.id ? updatedSample : s));
-    updateSamplesState(updated);
+    const saved = await updateSamplesState(updated);
+    if (!saved) return;
     setEditingSample(null);
     setEditSampleAudioUrl(null);
     setEditSampleFileName(null);
@@ -560,13 +557,14 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   };
 
   // Action: Reset Samples to Factory Defaults (non-blocking)
-  const handleResetToFactorySamples = () => {
+  const handleResetToFactorySamples = async () => {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
     setActivePlayingSampleId(null);
-    updateSamplesState(INITIAL_SHOWCASE_SAMPLES);
+    const saved = await updateSamplesState(INITIAL_SHOWCASE_SAMPLES);
+    if (!saved) return;
     setSampleActionToast('تمت استعادة كافة النماذج الصوتية الافتراضية بنجاح 🔄');
     setTimeout(() => setSampleActionToast(null), 4000);
   };
@@ -2158,7 +2156,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
                     type="button"
                     onClick={() => {
                       const testUrl = editSampleAudioUrl || editingSample.customAudioUrl;
-                      if (testUrl && testUrl.startsWith('data:audio')) {
+                      if (testUrl && (testUrl.startsWith('data:audio') || testUrl.startsWith('/api/showcase-samples/'))) {
                         const a = new Audio(testUrl);
                         a.play().catch(() => {
                           speakAdScript(editingSample.scriptText, editingSample.personaId);
