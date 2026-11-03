@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-type AudioGenerationResponse = { audioDataUrl?: string };
+type AudioGenerationResponse = { audioDataUrl?: string; error?: string; message?: string; details?: string };
 type ApiVerificationResponse = {
   success: boolean;
   latencyMs?: number;
