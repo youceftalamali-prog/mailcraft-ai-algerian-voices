@@ -32,7 +32,6 @@ import {
   AlgiersPersonaId,
   ALGIERS_PERSONA_REGISTRY,
 } from '../services/algerianPersonaVoiceService';
-import { createPersonaFallbackWav } from '../utils/audioFallback';
 import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';
 import {
   ShowcaseAudioSample,
@@ -210,53 +209,71 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
       if (sampleAudioRef.current) {
         sampleAudioRef.current.pause();
       }
+      stopAdSpeech();
     };
   }, []);
 
-  // Handle Play/Pause of Showcase Samples (supports speech audio WAV/MP3 or speech synthesis fallback)
+  // Play a real uploaded/generated recording when available. Factory samples have
+  // no recording, so read their exact script instead of playing a synthetic tone WAV.
   const handleToggleSamplePlay = (sample: ShowcaseAudioSample) => {
     if (activePlayingSampleId === sample.id) {
-      if (sampleAudioRef.current) {
-        sampleAudioRef.current.pause();
-      }
+      sampleAudioRef.current?.pause();
       stopAdSpeech();
       setActivePlayingSampleId(null);
+      setSampleAudioProgress(0);
       return;
     }
 
-    if (sampleAudioRef.current) {
-      sampleAudioRef.current.pause();
-    }
+    sampleAudioRef.current?.pause();
+    sampleAudioRef.current = null;
     stopAdSpeech();
+    setSampleAudioProgress(0);
 
-    // Use custom speech audio or vocal fallback
-    const audioDataUri = sample.customAudioUrl || createPersonaFallbackWav(sample.personaId, 6);
-    const audio = new Audio(audioDataUri);
+    const speakSampleText = () => {
+      setActivePlayingSampleId(sample.id);
+      void speakAdScript(sample.scriptText, sample.personaId, {
+        onEnd: () => {
+          setActivePlayingSampleId(null);
+          setSampleAudioProgress(0);
+        },
+        onError: (err) => {
+          console.warn('Showcase speech synthesis failed:', err);
+          setActivePlayingSampleId(null);
+        },
+      });
+    };
+
+    if (!sample.customAudioUrl) {
+      speakSampleText();
+      return;
+    }
+
+    const audio = new Audio(sample.customAudioUrl);
     sampleAudioRef.current = audio;
+    let speechFallbackStarted = false;
+    const fallbackToScriptSpeech = () => {
+      if (speechFallbackStarted) return;
+      speechFallbackStarted = true;
+      sampleAudioRef.current = null;
+      speakSampleText();
+    };
 
     audio.ontimeupdate = () => {
       if (audio.duration) {
         setSampleAudioProgress((audio.currentTime / audio.duration) * 100);
       }
     };
-
     audio.onended = () => {
       setActivePlayingSampleId(null);
       setSampleAudioProgress(0);
     };
+    audio.onerror = fallbackToScriptSpeech;
 
-    audio
-      .play()
-      .then(() => {
-        setActivePlayingSampleId(sample.id);
-      })
+    audio.play()
+      .then(() => setActivePlayingSampleId(sample.id))
       .catch((err) => {
-        console.warn('Audio play error, falling back to speech synthesis:', err);
-        setActivePlayingSampleId(sample.id);
-        speakAdScript(sample.scriptText, sample.personaId, {
-          onEnd: () => setActivePlayingSampleId(null),
-          onError: () => setActivePlayingSampleId(null),
-        });
+        console.warn('Showcase audio file failed; reading its script instead:', err);
+        fallbackToScriptSpeech();
       });
   };
 
