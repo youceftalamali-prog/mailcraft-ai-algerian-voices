@@ -1258,9 +1258,37 @@ app.post('/api/subscriptions/requests', subscriptionPaymentLimiter, requireAuth,
     return;
   }
   try {
+    let receiptData: Buffer | undefined;
+    let receiptMimeType: string | undefined;
+    let receiptFilename: string | undefined;
+    if (typeof req.body.receiptDataUrl === 'string' && req.body.receiptDataUrl) {
+      const match = req.body.receiptDataUrl.match(/^data:(image\\/(?:png|jpeg)|application\\/pdf);base64,([A-Za-z0-9+/=]+)$/);
+      if (!match || match[2].length > 900_000) {
+        res.status(400).json({ error: 'INVALID_RECEIPT_FILE', message: 'صيغة الإيصال غير مدعومة أو حجمه كبير.' });
+        return;
+      }
+      receiptMimeType = match[1];
+      receiptData = Buffer.from(match[2], 'base64');
+      if (receiptData.length > 650 * 1024) {
+        res.status(413).json({ error: 'RECEIPT_TOO_LARGE', message: 'الحد الأقصى لحجم الإيصال 650 كيلوبايت.' });
+        return;
+      }
+      const validSignature = receiptMimeType === 'image/png'
+        ? receiptData.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
+        : receiptMimeType === 'image/jpeg'
+          ? receiptData[0] === 0xff && receiptData[1] === 0xd8 && receiptData[2] === 0xff
+          : receiptData.subarray(0,5).toString('ascii') === '%PDF-';
+      if (!validSignature) {
+        res.status(400).json({ error: 'INVALID_RECEIPT_CONTENT', message: 'محتوى الملف لا يطابق نوعه.' });
+        return;
+      }
+      receiptFilename = typeof req.body.receiptFilename === 'string'
+        ? req.body.receiptFilename.replace(/[^\\p{L}\\p{N}._-]/gu, '_').slice(0,180)
+        : 'payment-receipt';
+    }
     const request = await createSubscriptionPaymentRequest({
       userId: req.user!.id, plan, billingCycle, paymentMethod, transactionReference,
-      senderName, receiptNote,
+      senderName, receiptNote, receiptData, receiptMimeType, receiptFilename,
     });
     res.status(201).json({ success: true, request });
   } catch (error: any) {
@@ -1279,6 +1307,17 @@ app.post('/api/subscriptions/requests', subscriptionPaymentLimiter, requireAuth,
 app.get('/api/subscriptions/requests', requireAuth, async (req: Request, res: Response): Promise<void> => {
   const requests = await getUserSubscriptionPaymentRequests(req.user!.id);
   res.json({ success: true, requests });
+});
+
+app.get('/api/admin/subscription-requests/:id/receipt', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const receipt = await getSubscriptionPaymentReceipt(req.params.id);
+  if (!receipt) { res.status(404).json({ error: 'RECEIPT_NOT_FOUND' }); return; }
+  res.setHeader('Content-Type', receipt.mimeType);
+  res.setHeader('Content-Length', receipt.data.length);
+  res.setHeader('Content-Disposition', `inline; filename="${receipt.filename.replace(/["\\\\]/g, '_')}"`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(receipt.data);
 });
 
 app.get('/api/admin/subscription-requests', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
