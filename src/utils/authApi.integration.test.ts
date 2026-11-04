@@ -152,6 +152,67 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
       headers: { cookie: adminCookie },
     });
     assert.equal(adminRouteResponse.status, 200, 'verified owner must access admin endpoints');
+    const paymentRequestResponse = await fetch(`${baseUrl}/api/subscriptions/requests`, {
+      method: 'POST',
+      headers: { cookie: loginCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        plan: 'starter', billingCycle: 'monthly', paymentMethod: 'baridimob',
+        transactionReference: `CI-TRANSFER-${Date.now()}`, amountDzd: 1,
+      }),
+    });
+    assert.equal(paymentRequestResponse.status, 201, 'authenticated customer can submit a payment request');
+    const paymentRequestPayload = await paymentRequestResponse.json() as {
+      request: { id: string; amountDzd: number; status: string; email: string };
+    };
+    assert.equal(paymentRequestPayload.request.amountDzd, 2900, 'server must calculate the amount and ignore client-supplied price');
+    assert.equal(paymentRequestPayload.request.status, 'pending');
+    assert.equal(paymentRequestPayload.request.email.toLowerCase(), userEmail.toLowerCase());
+
+    const secondPendingRequest = await fetch(`${baseUrl}/api/subscriptions/requests`, {
+      method: 'POST',
+      headers: { cookie: loginCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        plan: 'pro', billingCycle: 'annual', paymentMethod: 'edahabia',
+        transactionReference: `CI-SECOND-${Date.now()}`,
+      }),
+    });
+    assert.equal(secondPendingRequest.status, 409, 'a user cannot open multiple pending payment requests');
+
+    const customerRequestsResponse = await fetch(`${baseUrl}/api/subscriptions/requests`, {
+      headers: { cookie: loginCookie },
+    });
+    assert.equal(customerRequestsResponse.status, 200);
+    const customerRequests = await customerRequestsResponse.json() as { requests: Array<{ id: string }> };
+    assert.equal(customerRequests.requests.length, 1, 'customers can only read their own payment requests');
+
+    const pendingAdminRequests = await fetch(`${baseUrl}/api/admin/subscription-requests?status=pending`, {
+      headers: { cookie: adminCookie },
+    });
+    assert.equal(pendingAdminRequests.status, 200, 'verified owner can review payment requests');
+    const pendingPayload = await pendingAdminRequests.json() as { requests: Array<{ id: string; userId: string }> };
+    const requestToApprove = pendingPayload.requests.find((request) => request.id === paymentRequestPayload.request.id);
+    assert.ok(requestToApprove, 'submitted payment request must appear in admin queue');
+    const approvePaymentResponse = await fetch(`${baseUrl}/api/admin/subscription-requests/${paymentRequestPayload.request.id}`, {
+      method: 'PATCH',
+      headers: { cookie: adminCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'approved' }),
+    });
+    assert.equal(approvePaymentResponse.status, 200, 'admin approval must succeed after manual verification');
+    const activatedUser = await getDatabasePool().query(
+      'SELECT plan, monthly_generations_limit, subscription_expires_at FROM app_users WHERE id=$1',
+      [signup.user.id],
+    );
+    assert.equal(activatedUser.rows[0]?.plan, 'starter');
+    assert.equal(Number(activatedUser.rows[0]?.monthly_generations_limit), 50);
+    assert.ok(activatedUser.rows[0]?.subscription_expires_at, 'approval must set a subscription expiry');
+
+    const repeatedApproval = await fetch(`${baseUrl}/api/admin/subscription-requests/${paymentRequestPayload.request.id}`, {
+      method: 'PATCH',
+      headers: { cookie: adminCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'approved' }),
+    });
+    assert.equal(repeatedApproval.status, 409, 'a payment request cannot be approved twice');
+
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
