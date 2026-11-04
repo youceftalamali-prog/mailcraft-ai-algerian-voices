@@ -1154,7 +1154,29 @@ app.get('/api/admin/users', adminLimiter, requireAdmin, async (_req: Request, re
 });
 
 // Endpoint: Conflict-Free Algiers Persona & Emotion Voice Synthesis (Rate limited & usage controlled)
-app.post('/api/generate-persona-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
+// Enforce the free-trial character limit on the server, not only in the browser.
+// Paid plans and the owner retain the existing 2,500-character ceiling.
+function enforcePersonaScriptLimit(req: Request, res: Response, next: NextFunction): void {
+  const scriptText = req.body?.scriptText;
+  if (typeof scriptText !== 'string' || !scriptText.trim()) {
+    res.status(400).json({ error: 'INVALID_SCRIPT', message: 'النص مطلوب.' });
+    return;
+  }
+  const maxCharacters = req.user?.role === 'admin' || req.user?.plan !== 'free' ? 2500 : 500;
+  if (scriptText.length > maxCharacters) {
+    res.status(400).json({
+      error: 'SCRIPT_TOO_LONG',
+      maxCharacters,
+      message: maxCharacters === 500
+        ? 'الحد الأقصى للنص في التجربة المجانية هو 500 حرف.'
+        : 'الحد الأقصى للنص هو 2500 حرف.',
+    });
+    return;
+  }
+  next();
+}
+
+app.post('/api/generate-persona-speech', genLimiter, requireAuth, enforcePersonaScriptLimit, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, persona, emotionalCue, extraDirectives } = req.body;
     if (typeof scriptText !== 'string' || !scriptText.trim() || scriptText.length > 2500) {
