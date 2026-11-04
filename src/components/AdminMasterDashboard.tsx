@@ -59,7 +59,8 @@ import {
   ADMIN_EMAIL,
   isAdminUser,
 } from '../services/adminStore';
-import { saveShowcaseSamplesToServer } from '../services/showcaseSamplesApi';\nimport { SubscriptionPaymentsPanel } from './SubscriptionPaymentsPanel';
+import { saveShowcaseSamplesToServer } from '../services/showcaseSamplesApi';
+import { SubscriptionPaymentsPanel } from './SubscriptionPaymentsPanel';
 import {
   AlgiersPersonaId,
   ALGIERS_PERSONA_REGISTRY,
@@ -654,7 +655,9 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       {/* ========================================================================= */}
       {/* SECTION 1: Subscriptions Manager (قسم إدارة الاشتراكات وتأكيد المدفوعات) */}
       {/* ========================================================================= */}
-      {adminTab === 'subscriptions' && <SubscriptionPaymentsPanel />}\n\n      {adminTab === 'samples' && (
+      {adminTab === 'subscriptions' && <SubscriptionPaymentsPanel />}
+
+      {adminTab === 'samples' && (
         <div className="space-y-6 animate-fadeIn">
           {/* Header Action Bar */}
           <div className="p-5 rounded-3xl bg-slate-900 border border-indigo-500/30 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
