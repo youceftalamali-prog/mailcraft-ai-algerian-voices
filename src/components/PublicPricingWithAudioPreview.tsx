@@ -446,8 +446,8 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             >
               باقات الأسعار (دج)
             </button>
+            <button
               onClick={() => scrollToSection('payment-methods')}
-              onClick={() => { setSelectedPaymentPlan('starter'); scrollToSection('payment-methods'); }}
               className="hover:text-emerald-400 transition-colors cursor-pointer"
             >
               بريدي موب والذهبية
