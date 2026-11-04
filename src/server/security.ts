@@ -324,13 +324,13 @@ const subscriptionFromRow = (r: any): SubscriptionPaymentRequest => ({
   paymentMethod: r.payment_method, transactionReference: r.transaction_reference,
   senderName: r.sender_name || null, receiptNote: r.receipt_note || null,
   status: r.status, reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).toISOString() : null,
-  rejectionReason: r.rejection_reason || null, createdAt: new Date(r.created_at).toISOString(),
+  rejectionReason: r.rejection_reason || null, receiptAvailable: Boolean(r.receipt_available ?? r.receipt_data), createdAt: new Date(r.created_at).toISOString(),
 });
 
 export async function createSubscriptionPaymentRequest(input: {
   userId: string; plan: SubscriptionPlan; billingCycle: SubscriptionBillingCycle;
   paymentMethod: SubscriptionPaymentMethod; transactionReference: string;
-  senderName?: string; receiptNote?: string;
+  senderName?: string; receiptNote?: string; receiptData?: Buffer; receiptMimeType?: string; receiptFilename?: string;
 }): Promise<SubscriptionPaymentRequest> {
   const prices: Record<SubscriptionPlan, Record<SubscriptionBillingCycle, number>> = {
     starter: { monthly: 2900, annual: 29000 },
@@ -352,8 +352,8 @@ export async function createSubscriptionPaymentRequest(input: {
     if (pending.rowCount) throw new Error('PENDING_PAYMENT_EXISTS');
     await client.query(`
       INSERT INTO subscription_payment_requests
-        (id,user_id,plan,billing_cycle,amount_dzd,payment_method,transaction_reference,sender_name,receipt_note)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        (id,user_id,plan,billing_cycle,amount_dzd,payment_method,transaction_reference,sender_name,receipt_note,receipt_data,receipt_mime_type,receipt_filename)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *
     `, [id,input.userId,input.plan,input.billingCycle,amount,input.paymentMethod,reference,
       input.senderName?.trim().slice(0,120) || null,input.receiptNote?.trim().slice(0,1000) || null,
@@ -373,7 +373,7 @@ export async function createSubscriptionPaymentRequest(input: {
 
 export async function listSubscriptionPaymentRequests(status?: 'pending'|'approved'|'rejected'): Promise<SubscriptionPaymentRequest[]> {
   const result = await getDatabasePool().query(`
-    SELECT p.*, u.email FROM subscription_payment_requests p
+    SELECT p.id,p.user_id,p.plan,p.billing_cycle,p.amount_dzd,p.payment_method,p.transaction_reference,p.sender_name,p.receipt_note,p.status,p.reviewed_at,p.rejection_reason,p.created_at,u.email,(p.receipt_data IS NOT NULL) AS receipt_available FROM subscription_payment_requests p
     JOIN app_users u ON u.id=p.user_id
     WHERE ($1::text IS NULL OR p.status=$1)
     ORDER BY CASE WHEN p.status='pending' THEN 0 ELSE 1 END, p.created_at DESC
@@ -384,7 +384,7 @@ export async function listSubscriptionPaymentRequests(status?: 'pending'|'approv
 
 export async function getUserSubscriptionPaymentRequests(userId: string): Promise<SubscriptionPaymentRequest[]> {
   const result = await getDatabasePool().query(`
-    SELECT p.*, u.email FROM subscription_payment_requests p
+    SELECT p.id,p.user_id,p.plan,p.billing_cycle,p.amount_dzd,p.payment_method,p.transaction_reference,p.sender_name,p.receipt_note,p.status,p.reviewed_at,p.rejection_reason,p.created_at,u.email,(p.receipt_data IS NOT NULL) AS receipt_available FROM subscription_payment_requests p
     JOIN app_users u ON u.id=p.user_id WHERE p.user_id=$1
     ORDER BY p.created_at DESC LIMIT 50
   `, [userId]);
