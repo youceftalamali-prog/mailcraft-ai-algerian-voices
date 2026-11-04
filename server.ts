@@ -1323,7 +1323,7 @@ app.get('/api/admin/subscription-requests/:id/receipt', adminLimiter, requireAdm
   if (!receipt) { res.status(404).json({ error: 'RECEIPT_NOT_FOUND' }); return; }
   res.setHeader('Content-Type', receipt.mimeType);
   res.setHeader('Content-Length', receipt.data.length);
-  res.setHeader('Content-Disposition', `inline; filename="${receipt.filename.replace(/["\\\\]/g, '_')}"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${receipt.filename.replace(/["\\\\]/g, '_')}"`);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cache-Control', 'no-store');
   res.send(receipt.data);
