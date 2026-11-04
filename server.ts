@@ -32,7 +32,12 @@ import {
   getUserByEmail,
   updateUser,
   consumeGenerationAllowance,
-  getAllUsers,\n  createSubscriptionPaymentRequest,\n  getUserSubscriptionPaymentRequests,\n  listSubscriptionPaymentRequests,\n  reviewSubscriptionPaymentRequest,\n  ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
+  getAllUsers,
+  createSubscriptionPaymentRequest,
+  getUserSubscriptionPaymentRequests,
+  listSubscriptionPaymentRequests,
+  reviewSubscriptionPaymentRequest,
+  ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
 } from './src/server/security';
 
 export const app = express();
@@ -1308,7 +1313,8 @@ app.patch('/api/admin/subscription-requests/:id', adminLimiter, requireAdmin, as
   }
 });
 
-\n// Endpoint: Admin System Stats (Protected by requireAdmin)
+
+// Endpoint: Admin System Stats (Protected by requireAdmin)
 app.get('/api/admin/system-stats', adminLimiter, requireAdmin, (_req: Request, res: Response): void => {
   res.json({
     platformName: 'صوت التجارة DZ - استوديو الإعلانات العاصمية',
