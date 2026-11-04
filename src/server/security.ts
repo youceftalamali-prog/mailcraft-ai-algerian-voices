@@ -163,7 +163,12 @@ export async function getUserById(id: string): Promise<ServerUser | null> {
     WHERE id=$1 AND role='user' AND plan <> 'free'
       AND subscription_expires_at IS NOT NULL AND subscription_expires_at <= NOW()
   `, [id]);
-  await getDatabasePool().query(`\n    UPDATE app_users SET monthly_generations_used=0,\n      monthly_usage_resets_at=NOW() + INTERVAL '1 month'\n    WHERE id=$1 AND role='user' AND plan <> 'free'\n      AND monthly_usage_resets_at IS NOT NULL AND monthly_usage_resets_at <= NOW()\n  `, [id]);
+  await getDatabasePool().query(`
+    UPDATE app_users SET monthly_generations_used=0,
+      monthly_usage_resets_at=NOW() + INTERVAL '1 month'
+    WHERE id=$1 AND role='user' AND plan <> 'free'
+      AND monthly_usage_resets_at IS NOT NULL AND monthly_usage_resets_at <= NOW()
+  `, [id]);
   const r = await getDatabasePool().query('SELECT * FROM app_users WHERE id=$1', [id]);
   return r.rows[0] ? userFromRow(r.rows[0]) : null;
 }
