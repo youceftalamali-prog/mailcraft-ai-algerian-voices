@@ -301,9 +301,126 @@ app.post('/api/auth/admin-login', authLimiter, async (req: Request, res: Respons
   } });
 });
 
-// Google sign-in is intentionally disabled until a verified Google ID token flow is configured.
-app.post('/api/auth/google', authLimiter, (_req: Request, res: Response): void => {
-  res.status(501).json({ error: 'GOOGLE_OAUTH_NOT_CONFIGURED', message: 'تسجيل Google غير مفعّل حالياً. استخدم البريد وكلمة المرور إلى حين إعداد OAuth والتحقق من رمز Google على الخادم.' });
+type GoogleIdTokenClaims = {
+  iss?: string;
+  aud?: string | string[];
+  exp?: number;
+  iat?: number;
+  sub?: string;
+  email?: string;
+  email_verified?: boolean;
+};
+
+let googleJwksCache: { keys: JsonWebKey[]; expiresAt: number } | null = null;
+
+function decodeBase64UrlJson<T>(segment: string): T {
+  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+  return JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as T;
+}
+
+async function getGoogleSigningKeys(): Promise<JsonWebKey[]> {
+  if (googleJwksCache && googleJwksCache.expiresAt > Date.now()) return googleJwksCache.keys;
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/certs', {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error('GOOGLE_SIGNING_KEYS_UNAVAILABLE');
+  const payload = await response.json() as { keys?: JsonWebKey[] };
+  if (!Array.isArray(payload.keys) || payload.keys.length === 0) throw new Error('GOOGLE_SIGNING_KEYS_INVALID');
+  const cacheControl = response.headers.get('cache-control') || '';
+  const maxAge = Number(cacheControl.match(/max-age=(\\d+)/i)?.[1] || 300);
+  googleJwksCache = { keys: payload.keys, expiresAt: Date.now() + Math.min(Math.max(maxAge, 60), 3600) * 1000 };
+  return payload.keys;
+}
+
+async function verifyGoogleIdToken(idToken: string, clientId: string): Promise<GoogleIdTokenClaims | null> {
+  if (idToken.length > 12_000) return null;
+  const segments = idToken.split('.');
+  if (segments.length !== 3) return null;
+
+  try {
+    const header = decodeBase64UrlJson<{ alg?: string; kid?: string }>(segments[0]);
+    const claims = decodeBase64UrlJson<GoogleIdTokenClaims>(segments[1]);
+    if (header.alg !== 'RS256' || !header.kid) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    if (
+      (claims.iss !== 'https://accounts.google.com' && claims.iss !== 'accounts.google.com') ||
+      !audiences.includes(clientId) ||
+      typeof claims.exp !== 'number' || claims.exp <= now ||
+      typeof claims.iat !== 'number' || claims.iat > now + 300 ||
+      typeof claims.sub !== 'string' || claims.sub.length < 1 ||
+      typeof claims.email !== 'string' || claims.email.length > 254 ||
+      claims.email_verified !== true
+    ) return null;
+
+    const jwk = (await getGoogleSigningKeys()).find((key) => key.kid === header.kid && key.kty === 'RSA' && key.use === 'sig');
+    if (!jwk) {
+      googleJwksCache = null;
+      const refreshed = await getGoogleSigningKeys();
+      const refreshedKey = refreshed.find((key) => key.kid === header.kid && key.kty === 'RSA' && key.use === 'sig');
+      if (!refreshedKey) return null;
+      const publicKey = await crypto.subtle.importKey('jwk', refreshedKey, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+      const signature = Buffer.from(segments[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+      const signedContent = new TextEncoder().encode(segments[0] + '.' + segments[1]);
+      return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', publicKey, signature, signedContent) ? claims : null;
+    }
+    const publicKey = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const signature = Buffer.from(segments[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    const signedContent = new TextEncoder().encode(segments[0] + '.' + segments[1]);
+    return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', publicKey, signature, signedContent) ? claims : null;
+  } catch {
+    return null;
+  }
+}
+
+// Google Identity Services ID-token sign-in. The browser token is never trusted
+// until its signature and OIDC claims are verified against Google's published keys.
+app.post('/api/auth/google', authLimiter, async (req: Request, res: Response): Promise<void> => {
+  const clientId = getRequestEnvironmentValue('GOOGLE_CLIENT_ID');
+  if (!clientId) {
+    res.status(503).json({ error: 'GOOGLE_AUTH_NOT_CONFIGURED', message: 'تسجيل Google غير مهيأ في بيئة المعاينة.' });
+    return;
+  }
+  const credential = req.body?.credential;
+  if (typeof credential !== 'string' || !credential) {
+    res.status(400).json({ error: 'GOOGLE_CREDENTIAL_REQUIRED', message: 'لم يصل رمز تسجيل الدخول من Google.' });
+    return;
+  }
+
+  const claims = await verifyGoogleIdToken(credential, clientId);
+  if (!claims?.email) {
+    res.status(401).json({ error: 'GOOGLE_TOKEN_INVALID', message: 'تعذر التحقق من حساب Google. أعد المحاولة.' });
+    return;
+  }
+
+  const email = claims.email.trim().toLowerCase();
+  if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email === SECURITY_ADMIN_EMAIL.toLowerCase()) {
+    res.status(403).json({ error: 'GOOGLE_ACCOUNT_NOT_ALLOWED', message: 'حساب المالك يستخدم تسجيل الدخول الإداري المنفصل.' });
+    return;
+  }
+
+  try {
+    let user = await getUserByEmail(email);
+    if (!user) user = await registerOrGetUser(email, 'user');
+    if (user.role !== 'user') {
+      res.status(403).json({ error: 'GOOGLE_ACCOUNT_NOT_ALLOWED', message: 'هذا الحساب غير متاح لتسجيل الدخول عبر Google.' });
+      return;
+    }
+    user = (await updateUser(user.id, { lastLoginAt: new Date().toISOString() })) || user;
+    const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
+    const session = await createSession(user.id, ip);
+    setAuthCookie(res, session.token);
+    res.json({ success: true, user: {
+      id: user.id, email: user.email, role: user.role, plan: user.plan,
+      trialGenerationsUsed: user.trialGenerationsUsed, trialGenerationsLimit: user.trialGenerationsLimit,
+      monthlyGenerationsUsed: user.monthlyGenerationsUsed, monthlyGenerationsLimit: user.monthlyGenerationsLimit,
+    } });
+  } catch (error) {
+    console.error('Google sign-in account/session creation failed:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(500).json({ error: 'GOOGLE_SIGN_IN_FAILED', message: 'تعذر إكمال تسجيل الدخول. حاول مرة أخرى.' });
+  }
 });
 
 // Endpoint: Get Current Authenticated Session & User Profile
