@@ -6,7 +6,9 @@ export const SubscriptionPaymentRequestForm: React.FC<Props> = ({ currentUserEma
   const [method,setMethod] = useState<'baridimob'|'edahabia'>('baridimob');
   const [reference,setReference] = useState('');
   const [sender,setSender] = useState('');
-  const [note,setNote] = useState('');\n  const [receiptDataUrl,setReceiptDataUrl] = useState('');\n  const [receiptFilename,setReceiptFilename] = useState('');
+  const [note,setNote] = useState('');
+  const [receiptDataUrl,setReceiptDataUrl] = useState('');
+  const [receiptFilename,setReceiptFilename] = useState('');
   const [busy,setBusy] = useState(false);
   const [message,setMessage] = useState<{ok:boolean;text:string}|null>(null);
   const prices = { starter: {monthly:2900,annual:29000}, pro:{monthly:5900,annual:59000}, business:{monthly:14500,annual:145000} };
