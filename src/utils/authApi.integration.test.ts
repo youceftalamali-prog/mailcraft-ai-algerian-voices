@@ -166,15 +166,15 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
       headers: { cookie: paymentCookie, 'content-type': 'application/json' },
       body: JSON.stringify({
         plan: 'starter', billingCycle: 'monthly', paymentMethod: 'baridimob',
-        transactionReference: `CI-TRANSFER-${Date.now()}`, amountDzd: 1,
+        transactionReference: `CI-TRANSFER-${Date.now()}`, amountDzd: 1,\n        receiptDataUrl: `data:image/png;base64,${Buffer.from([137,80,78,71,13,10,26,10]).toString('base64')}`,\n        receiptFilename: 'receipt.png',
       }),
     });
     assert.equal(paymentRequestResponse.status, 201, 'authenticated customer can submit a payment request');
     const paymentRequestPayload = await paymentRequestResponse.json() as {
-      request: { id: string; amountDzd: number; status: string; email: string };
+      request: { id: string; amountDzd: number; status: string; email: string; receiptAvailable: boolean };
     };
     assert.equal(paymentRequestPayload.request.amountDzd, 2900, 'server must calculate the amount and ignore client-supplied price');
-    assert.equal(paymentRequestPayload.request.status, 'pending');
+    assert.equal(paymentRequestPayload.request.status, 'pending');\n    assert.equal(paymentRequestPayload.request.receiptAvailable, true, 'uploaded receipt must be stored and marked available');
     assert.equal(paymentRequestPayload.request.email.toLowerCase(), userEmail.toLowerCase());
 
     const secondPendingRequest = await fetch(`${baseUrl}/api/subscriptions/requests`, {
@@ -201,6 +201,13 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     const pendingPayload = await pendingAdminRequests.json() as { requests: Array<{ id: string; userId: string }> };
     const requestToApprove = pendingPayload.requests.find((request) => request.id === paymentRequestPayload.request.id);
     assert.ok(requestToApprove, 'submitted payment request must appear in admin queue');
+    const receiptResponse = await fetch(`${baseUrl}/api/admin/subscription-requests/${paymentRequestPayload.request.id}/receipt`, {
+      headers: { cookie: adminCookie },
+    });
+    assert.equal(receiptResponse.status, 200, 'only the authenticated owner can read a submitted receipt');
+    assert.equal(receiptResponse.headers.get('content-type'), 'image/png');
+    assert.equal((await receiptResponse.arrayBuffer()).byteLength, 8);
+
     const approvePaymentResponse = await fetch(`${baseUrl}/api/admin/subscription-requests/${paymentRequestPayload.request.id}`, {
       method: 'PATCH',
       headers: { cookie: adminCookie, 'content-type': 'application/json' },
