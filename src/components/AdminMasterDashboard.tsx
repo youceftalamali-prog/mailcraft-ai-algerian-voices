@@ -50,14 +50,10 @@ import {
   X
 } from 'lucide-react';
 import {
-  AdminSubscription,
   ShowcaseAudioSample,
   AdminAISettings,
-  loadAdminSubscriptions,
-  saveAdminSubscriptions,
   loadAdminAISettings,
   saveAdminAISettings,
-  INITIAL_SUBSCRIPTIONS,
   INITIAL_SHOWCASE_SAMPLES,
   INITIAL_AI_SETTINGS,
   ADMIN_EMAIL,
@@ -87,26 +83,6 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
 }) => {
   // Active Tab inside Admin Dashboard
   const [adminTab, setAdminTab] = useState<'subscriptions' | 'samples' | 'ai_settings' | 'overview'>('subscriptions');
-
-  // Subscriptions State
-  const [subscriptions, setSubscriptions] = useState<AdminSubscription[]>(() => loadAdminSubscriptions());
-  const [subSearchQuery, setSubSearchQuery] = useState('');
-  const [subStatusFilter, setSubStatusFilter] = useState<'all' | 'pending' | 'active' | 'rejected'>('all');
-  const [subMethodFilter, setSubMethodFilter] = useState<'all' | 'baridimob' | 'edahabia'>('all');
-  const [selectedReceiptSub, setSelectedReceiptSub] = useState<AdminSubscription | null>(null);
-  const [showAddSubModal, setShowAddSubModal] = useState(false);
-  const [copiedTxnId, setCopiedTxnId] = useState<string | null>(null);
-
-  // New Subscription Form State
-  const [newStoreName, setNewStoreName] = useState('');
-  const [newOwnerName, setNewOwnerName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newPhone, setNewPhone] = useState('');
-  const [newWilaya, setNewWilaya] = useState('16 - الجزائر العاصمة');
-  const [newPlan, setNewPlan] = useState<'starter' | 'pro' | 'business'>('pro');
-  const [newMethod, setNewMethod] = useState<'baridimob' | 'edahabia'>('baridimob');
-  const [newTxnId, setNewTxnId] = useState('');
-  const [newNote, setNewNote] = useState('');
 
   // Voice Samples State (with live synchronization)
   const [samples, setSamples] = useState<ShowcaseAudioSample[]>(() =>
@@ -196,12 +172,6 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       setTimeout(() => setSampleActionToast(null), 5000);
       return false;
     }
-  };
-
-  // Sync subscriptions changes to storage
-  const updateSubscriptionsState = (newSubs: AdminSubscription[]) => {
-    setSubscriptions(newSubs);
-    saveAdminSubscriptions(newSubs);
   };
 
   // Stop audio on unmount
@@ -626,28 +596,6 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     setSaveSettingsSuccess(true);
     setTimeout(() => setSaveSettingsSuccess(false), 3000);
   };
-
-  // Copy Transaction ID Helper
-  const handleCopyTxn = (txnId: string) => {
-    navigator.clipboard.writeText(txnId);
-    setCopiedTxnId(txnId);
-    setTimeout(() => setCopiedTxnId(null), 2000);
-  };
-
-  // Computed Subscriptions Filter
-  const filteredSubscriptions = subscriptions.filter((sub) => {
-    const matchesSearch =
-      sub.storeName.toLowerCase().includes(subSearchQuery.toLowerCase()) ||
-      sub.ownerName.toLowerCase().includes(subSearchQuery.toLowerCase()) ||
-      sub.transactionId.toLowerCase().includes(subSearchQuery.toLowerCase()) ||
-      sub.phone.includes(subSearchQuery) ||
-      sub.email.toLowerCase().includes(subSearchQuery.toLowerCase());
-
-    const matchesStatus = subStatusFilter === 'all' || sub.status === subStatusFilter;
-    const matchesMethod = subMethodFilter === 'all' || sub.paymentMethod === subMethodFilter;
-
-    return matchesSearch && matchesStatus && matchesMethod;
-  });
 
   // Metrics come from verified database records, never browser-local demo data.
   const totalSubscribers = subscriptionStats.totalUsers;
@@ -1365,248 +1313,6 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
 
       {/* ========================================================================= */}
       {/* MODAL 1: View Receipt & Subscription Details Modal */}
-      {/* ========================================================================= */}
-      {selectedReceiptSub && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn" dir="rtl">
-          <div className="relative w-full max-w-lg rounded-3xl bg-slate-900 border border-indigo-500/40 p-6 sm:p-8 shadow-2xl space-y-5">
-            <button
-              type="button"
-              onClick={() => setSelectedReceiptSub(null)}
-              className="absolute top-4 left-4 p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center text-2xl font-bold">
-                📄
-              </div>
-              <div>
-                <h3 className="text-base font-black text-white">إشعار تفاصيل الدفع والمعاملة</h3>
-                <span className="text-xs text-slate-400 font-mono">
-                  معرّف الطلب: #{selectedReceiptSub.id}
-                </span>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5 text-xs text-slate-300">
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">اسم المتجر:</span>
-                <strong className="text-white">{selectedReceiptSub.storeName}</strong>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">صاحب المتجر:</span>
-                <span className="text-white">{selectedReceiptSub.ownerName}</span>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">الهاتف والولاية:</span>
-                <span className="text-white">{selectedReceiptSub.phone} ({selectedReceiptSub.wilaya})</span>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">الباقة المختارة:</span>
-                <span className="text-indigo-300 font-bold">{selectedReceiptSub.planLabel}</span>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">المبلغ المدفوع:</span>
-                <span className="text-emerald-400 font-bold font-mono text-sm">
-                  {selectedReceiptSub.amountDzd.toLocaleString('fr-DZ')} دج
-                </span>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">كود مرجع المعاملة (Txn ID):</span>
-                <span className="text-indigo-400 font-mono font-bold" dir="ltr">
-                  {selectedReceiptSub.transactionId}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">ملاحظة الوصل:</span>
-                <span className="text-slate-200">{selectedReceiptSub.receiptNote || 'لا توجد ملاحظات'}</span>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center justify-between gap-3 pt-2">
-              {selectedReceiptSub.status === 'pending' ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleActivateSubscription(selectedReceiptSub.id);
-                      setSelectedReceiptSub(null);
-                    }}
-                    className="flex-1 py-3 rounded-xl text-xs sm:text-sm font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-md transition-all cursor-pointer"
-                  >
-                    تأكيد وتفعيل الحساب فوراً ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleRejectSubscription(selectedReceiptSub.id);
-                      setSelectedReceiptSub(null);
-                    }}
-                    className="px-4 py-3 rounded-xl text-xs font-bold text-rose-300 bg-rose-950 border border-rose-800 hover:bg-rose-900 transition-all cursor-pointer"
-                  >
-                    رفض ✕
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setSelectedReceiptSub(null)}
-                  className="w-full py-3 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
-                >
-                  إغلاق الإشعار
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 2: Add Manual Subscription Modal */}
-      {/* ========================================================================= */}
-      {showAddSubModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn" dir="rtl">
-          <div className="relative w-full max-w-lg rounded-3xl bg-slate-900 border border-indigo-500/40 p-6 sm:p-8 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <button
-              type="button"
-              onClick={() => setShowAddSubModal(false)}
-              className="absolute top-4 left-4 p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div>
-              <h3 className="text-base font-black text-white">إضافة معاملة اشتراك محلية يدوياً</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                سجّل أي تحويل وصلك عبر الهاتف أو WhatsApp من متجر جديد.
-              </p>
-            </div>
-
-            <form onSubmit={handleAddNewSubscription} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">اسم المتجر المشترك:</label>
-                <input
-                  type="text"
-                  required
-                  value={newStoreName}
-                  onChange={(e) => setNewStoreName(e.target.value)}
-                  placeholder="مثال: متجر البهجة للإلكترونيات"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">اسم المسؤول:</label>
-                  <input
-                    type="text"
-                    value={newOwnerName}
-                    onChange={(e) => setNewOwnerName(e.target.value)}
-                    placeholder="أمين مداني"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">رقم الهاتف:</label>
-                  <input
-                    type="tel"
-                    value={newPhone}
-                    onChange={(e) => setNewPhone(e.target.value)}
-                    placeholder="0550 12 34 56"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">البريد الإلكتروني:</label>
-                  <input
-                    type="email"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    placeholder="store@domain.dz"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">الولاية:</label>
-                  <input
-                    type="text"
-                    value={newWilaya}
-                    onChange={(e) => setNewWilaya(e.target.value)}
-                    placeholder="16 - الجزائر"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">الباقة:</label>
-                  <select
-                    value={newPlan}
-                    onChange={(e) => setNewPlan(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  >
-                    <option value="starter">Starter (2,900 دج)</option>
-                    <option value="pro">Pro E-Commerce (5,900 دج)</option>
-                    <option value="business">Agency (14,500 دج)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">طريقة الدفع:</label>
-                  <select
-                    value={newMethod}
-                    onChange={(e) => setNewMethod(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  >
-                    <option value="baridimob">بريدي موب (BaridiMob)</option>
-                    <option value="edahabia">البطاقة الذهبية (Edahabia)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">
-                  كود مرجع المعاملة (Transaction ID):
-                </label>
-                <input
-                  type="text"
-                  value={newTxnId}
-                  onChange={(e) => setNewTxnId(e.target.value)}
-                  placeholder="BM-98234-DZ أو رقم الوصل"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">ملاحظة حول الوصل:</label>
-                <input
-                  type="text"
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  placeholder="تم إرسال صورة الوصل عبر واتساب"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full mt-2 py-3 rounded-xl text-xs font-black text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-all cursor-pointer shadow-lg"
-              >
-                تسجيل المعاملة وإضافتها للقائمة ➕
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 3: Add / Upload New Voice Sample Modal */}
       {/* ========================================================================= */}
       {showAddSampleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn" dir="rtl">
