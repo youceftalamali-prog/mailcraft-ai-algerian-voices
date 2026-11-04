@@ -450,7 +450,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               onClick={() => scrollToSection('payment-methods')}
               className="hover:text-emerald-400 transition-colors cursor-pointer"
             >
-              بريدي موب والذهبية
+              طرق الدفع
             </button>
             <button
               onClick={() => scrollToSection('auth-section')}
@@ -547,7 +547,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             </span>
             <span className="flex items-center gap-2 bg-slate-900/90 px-4 py-2 rounded-xl border border-slate-800 shadow-md">
               <CreditCard className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>دفع محلي عبر بريدي موب والذهبية</span>
+              <span>تحويل BaridiMob مع مراجعة يدوية</span>
             </span>
           </div>
 
@@ -770,7 +770,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             </h2>
             <p className="text-sm sm:text-base text-slate-300 mt-2.5 max-w-2xl mx-auto">
               بدون الحاجة لبطاقات فيزا أو ماستركارد دولية! ادفع مباشرة عبر بريدي موب (BaridiMob) أو البطاقة
-              الذهبية (Edahabia) بأسعار واضحة بالدينار الجزائري.
+              تحويل BaridiMob متاح حالياً، أما الدفع المباشر بالبطاقة الذهبية فغير مفعّل بعد.
             </p>
 
             {/* Monthly / Annual Toggle Switch */}
@@ -1315,7 +1315,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             },
             {
               q: 'ماذا يحدث بعد استهلاك تجربة الإعلان المجانية الأولى؟',
-              a: 'بعد استهلاك تجربتك المجانية الأولى بنجاح، يمكنك الترقية إلى باقة Starter (2,900 دج) أو باقة Pro E-Commerce (5,900 دج) عبر الدفع المحلي بـ بريدي موب أو البطاقة الذهبية لمواصلة إنتاج الإعلانات بدون قيود.',
+              a: 'بعد استهلاك تجربتك المجانية الأولى بنجاح، يمكنك الترقية إلى باقة Starter (2,900 دج) أو باقة Pro E-Commerce (5,900 دج) عبر تحويل BaridiMob بعد تأكيد بيانات الحساب الرسمية والتحقق اليدوي من وصول المبلغ.',
             },
             {
               q: 'لماذا يعتبر الصوت العاصمي الصافي الأفضل لإعلانات التجارة الإلكترونية في الجزائر؟',
