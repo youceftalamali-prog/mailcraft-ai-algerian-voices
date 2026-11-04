@@ -1056,7 +1056,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   </div>
                   <div>
                     <h3 className="text-base font-extrabold text-white">تطبيق بريدي موب (BaridiMob)</h3>
-                    <p className="text-xs text-slate-400">بيانات التحويل الرسمية بعد تأكيدها</p>
+                    <p className="text-xs text-slate-400">رقم الحساب البريدي للتحويل عبر BaridiMob</p>
                   </div>
                 </div>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -1064,8 +1064,10 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                 </span>
               </div>
 
-              <div className="rounded-xl bg-slate-900 border border-slate-700 p-4 text-xs text-slate-300 leading-6">
-                بيانات الحساب البريدي الرسمية ستظهر هنا بعد تأكيد صاحب المنصة لها. لا تحوّل أي مبلغ إلى رقم غير موثّق.
+              <div className="rounded-xl bg-slate-900 border border-slate-700 p-4 space-y-2">
+                <p className="text-xs text-slate-400">رقم CCP للتحويل</p>
+                <p dir="ltr" className="text-xl sm:text-2xl font-black tracking-wider text-white text-center select-all">00799999000001732820</p>
+                <p className="text-[11px] text-slate-400 text-center">انسخ رقم الحساب وأكمل التحويل من تطبيق BaridiMob. لا حاجة لإدخال اسم صاحب الحساب في هذه الصفحة.</p>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
                 بعد إتمام التحويل، أدخل رقم مرجع العملية في نموذج طلب الاشتراك أدناه. ستتم مراجعة وصول المبلغ يدوياً.
