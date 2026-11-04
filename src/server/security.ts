@@ -340,11 +340,15 @@ export async function createSubscriptionPaymentRequest(input: {
       INSERT INTO subscription_payment_requests
         (id,user_id,plan,billing_cycle,amount_dzd,payment_method,transaction_reference,sender_name,receipt_note)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      RETURNING *, (SELECT email FROM app_users WHERE id=$2) AS email
+      RETURNING *
     `, [id,input.userId,input.plan,input.billingCycle,amount,input.paymentMethod,reference,
       input.senderName?.trim().slice(0,120) || null,input.receiptNote?.trim().slice(0,1000) || null]);
+    const withEmail = await client.query(`
+      SELECT p.*, u.email FROM subscription_payment_requests p
+      JOIN app_users u ON u.id=p.user_id WHERE p.id=$1
+    `, [id]);
     await client.query('COMMIT');
-    return subscriptionFromRow(result.rows[0]);
+    return subscriptionFromRow(withEmail.rows[0]);
   } catch (error: any) {
     await client.query('ROLLBACK').catch(() => undefined);
     if (error?.code === '23505') throw new Error('DUPLICATE_TRANSACTION_REFERENCE');
@@ -398,11 +402,15 @@ export async function reviewSubscriptionPaymentRequest(input: {
     const updated = await client.query(`
       UPDATE subscription_payment_requests
       SET status=$2, reviewed_by=$3, reviewed_at=NOW(), rejection_reason=$4
-      WHERE id=$1 RETURNING *, (SELECT email FROM app_users WHERE id=user_id) AS email
+      WHERE id=$1 RETURNING id
     `, [input.requestId,input.decision,input.adminUserId,
       input.decision === 'rejected' ? input.rejectionReason?.trim().slice(0,500) || 'لم يتم إثبات الدفع.' : null]);
+    const withEmail = await client.query(`
+      SELECT p.*, u.email FROM subscription_payment_requests p
+      JOIN app_users u ON u.id=p.user_id WHERE p.id=$1
+    `, [input.requestId]);
     await client.query('COMMIT');
-    return subscriptionFromRow(updated.rows[0]);
+    return subscriptionFromRow(withEmail.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
