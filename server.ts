@@ -1262,7 +1262,7 @@ app.post('/api/subscriptions/requests', subscriptionPaymentLimiter, requireAuth,
     let receiptMimeType: string | undefined;
     let receiptFilename: string | undefined;
     if (typeof req.body.receiptDataUrl === 'string' && req.body.receiptDataUrl) {
-      const match = req.body.receiptDataUrl.match(/^data:(image\\/(?:png|jpeg)|application\\/pdf);base64,([A-Za-z0-9+/=]+)$/);
+      const match = req.body.receiptDataUrl.match(/^data:(image[/](?:png|jpeg)|application[/]pdf);base64,([A-Za-z0-9+/=]+)$/);
       if (!match || match[2].length > 900_000) {
         res.status(400).json({ error: 'INVALID_RECEIPT_FILE', message: 'صيغة الإيصال غير مدعومة أو حجمه كبير.' });
         return;
@@ -1283,7 +1283,7 @@ app.post('/api/subscriptions/requests', subscriptionPaymentLimiter, requireAuth,
         return;
       }
       receiptFilename = typeof req.body.receiptFilename === 'string'
-        ? req.body.receiptFilename.replace(/[^\\p{L}\\p{N}._-]/gu, '_').slice(0,180)
+        ? req.body.receiptFilename.replace(/[^A-Za-z0-9._-]/g, '_').slice(0,180)
         : 'payment-receipt';
     }
     const request = await createSubscriptionPaymentRequest({
