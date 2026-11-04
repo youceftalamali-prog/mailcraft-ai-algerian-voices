@@ -145,6 +145,10 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   } | null>(null);
   const [saveSettingsSuccess, setSaveSettingsSuccess] = useState(false);
 
+  const [subscriptionStats, setSubscriptionStats] = useState({
+    totalUsers: 0, pendingRequests: 0, activeSubscribers: 0, verifiedRevenueDzd: 0,
+  });
+
   // System Stats State
   const [systemStats, setSystemStats] = useState<{
     uptimeSeconds?: number;
@@ -152,6 +156,14 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     serverTime?: string;
     nodeVersion?: string;
   } | null>(null);
+
+  // Load real subscription metrics from the protected server API.
+  useEffect(() => {
+    fetch('/api/admin/subscription-summary', { credentials: 'same-origin', cache: 'no-store' })
+      .then((res) => res.ok ? res.json() as Promise<typeof subscriptionStats> : null)
+      .then((data) => { if (data) setSubscriptionStats(data); })
+      .catch((error) => console.warn('Could not load subscription summary:', error));
+  }, []);
 
   // Fetch live system stats on mount
   useEffect(() => {
@@ -637,13 +649,11 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     return matchesSearch && matchesStatus && matchesMethod;
   });
 
-  // Calculate Metrics
-  const totalSubscribers = subscriptions.length;
-  const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
-  const activeCount = subscriptions.filter((s) => s.status === 'active').length;
-  const totalRevenueDzd = subscriptions
-    .filter((s) => s.status === 'active')
-    .reduce((sum, s) => sum + s.amountDzd, 0);
+  // Metrics come from verified database records, never browser-local demo data.
+  const totalSubscribers = subscriptionStats.totalUsers;
+  const pendingCount = subscriptionStats.pendingRequests;
+  const activeCount = subscriptionStats.activeSubscribers;
+  const totalRevenueDzd = subscriptionStats.verifiedRevenueDzd;
 
   return (
     <div className="space-y-8 min-h-screen text-slate-100 font-sans pb-16" dir="rtl">
