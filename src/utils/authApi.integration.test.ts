@@ -62,6 +62,17 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     assert.equal(me.user?.id, signup.user.id);
     assert.equal(me.user?.role, 'user');
 
+    const oversizedFreeTrialResponse = await fetch(`${baseUrl}/api/generate-persona-speech`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ scriptText: 'x'.repeat(501), persona: 'zephyr_warm' }),
+    });
+    assert.equal(oversizedFreeTrialResponse.status, 400,
+      'free-trial users must not bypass the 500-character limit with direct API requests');
+    const allowanceAfterRejectedScript = await fetch(`${baseUrl}/api/auth/allowance`, { headers: { cookie } });
+    assert.equal((await allowanceAfterRejectedScript.json() as { remaining: number }).remaining, 1,
+      'rejected oversized input must not consume the free-trial generation');
+
     const userAdminResponse = await fetch(`${baseUrl}/api/admin/system-stats`, { headers: { cookie } });
     assert.equal(userAdminResponse.status, 403, 'ordinary users must not access admin endpoints');
 
