@@ -163,102 +163,7 @@ export const INITIAL_SHOWCASE_SAMPLES: ShowcaseAudioSample[] = [
 ];
 
 // Initial Subscriptions Seed Data with SunVera Jolie and other Algerian stores
-export const INITIAL_SUBSCRIPTIONS: AdminSubscription[] = [
-  {
-    id: 'sub-001',
-    storeName: 'متجر SunVera Jolie للموضة النسائية',
-    ownerName: 'سارة بوثلجة',
-    email: 'contact@sunvera-jolie.dz',
-    phone: '0554 12 88 90',
-    wilaya: '16 - الجزائر (حيدرة)',
-    plan: 'pro',
-    planLabel: 'Pro E-Commerce',
-    amountDzd: 5900,
-    paymentMethod: 'baridimob',
-    transactionId: 'BM-98234-DZ',
-    status: 'pending',
-    createdAt: '2026-10-30 11:24',
-    receiptNote: 'تحويل 5,900 دج عبر بريدي موب - إشعار رقم 88921',
-    adGenerationsUsed: 0,
-    adGenerationsLimit: 9999,
-  },
-  {
-    id: 'sub-002',
-    storeName: 'متجر البهجة للإلكترونيات والأجهزة',
-    ownerName: 'أمين مداني',
-    email: 'elbahdja.tech@gmail.com',
-    phone: '0661 44 23 11',
-    wilaya: '09 - البليدة',
-    plan: 'starter',
-    planLabel: 'باقة الانطلاق (Starter)',
-    amountDzd: 2900,
-    paymentMethod: 'edahabia',
-    transactionId: 'SATIM-448102',
-    status: 'active',
-    createdAt: '2026-10-29 09:15',
-    activatedAt: '2026-10-29 09:18',
-    receiptNote: 'دفع آلي ناجح عبر البطاقة الذهبية',
-    adGenerationsUsed: 14,
-    adGenerationsLimit: 50,
-  },
-  {
-    id: 'sub-003',
-    storeName: 'دار القفطان العاصمي واللباس التقليدي',
-    ownerName: 'حسيبة قادري',
-    email: 'dar.caftan.alger@outlook.com',
-    phone: '0770 99 18 33',
-    wilaya: '16 - الجزائر (القبة)',
-    plan: 'business',
-    planLabel: 'باقة الوكالات والشركات (Agency)',
-    amountDzd: 14500,
-    paymentMethod: 'baridimob',
-    transactionId: 'BM-11094-ALG',
-    status: 'active',
-    createdAt: '2026-10-28 16:40',
-    activatedAt: '2026-10-28 17:02',
-    receiptNote: 'تحويل سنوي كامل عبر بريدي موب مع فاتورة',
-    adGenerationsUsed: 82,
-    adGenerationsLimit: 9999,
-  },
-  {
-    id: 'sub-004',
-    storeName: 'سيرتا كوزميتيكس والزيوت الطبيعية',
-    ownerName: 'ياسين بن عيسى',
-    email: 'cirta.bio@gmail.com',
-    phone: '0550 88 14 77',
-    wilaya: '25 - قسنطينة',
-    plan: 'pro',
-    planLabel: 'Pro E-Commerce',
-    amountDzd: 5900,
-    paymentMethod: 'baridimob',
-    transactionId: 'BM-55219-CS',
-    status: 'pending',
-    createdAt: '2026-10-30 14:05',
-    receiptNote: 'تحويل عبر BaridiMob وصل جديد قيد التدقيق',
-    adGenerationsUsed: 0,
-    adGenerationsLimit: 9999,
-  },
-  {
-    id: 'sub-005',
-    storeName: 'DZ Sport & Sneaker Store',
-    ownerName: 'كريم مزيان',
-    email: 'karim.sneakers@yahoo.fr',
-    phone: '0672 55 90 12',
-    wilaya: '31 - وهران',
-    plan: 'starter',
-    planLabel: 'باقة الانطلاق (Starter)',
-    amountDzd: 2900,
-    paymentMethod: 'edahabia',
-    transactionId: 'SATIM-881290',
-    status: 'rejected',
-    createdAt: '2026-10-27 18:20',
-    receiptNote: 'فشل العملية البنكية - رصيد غير كافٍ أو ملغاة من العميل',
-    adGenerationsUsed: 0,
-    adGenerationsLimit: 50,
-  },
-];
-
-// Initial AI & API Settings
+export const INITIAL_SUBSCRIPTIONS: AdminSubscription[] = [];\n\n// Initial AI & API Settings
 export const INITIAL_AI_SETTINGS: AdminAISettings = {
   primaryModel: 'gemini-3.8-flash',
   ttsModel: 'gemini-3.8-flash-lite-tts',
@@ -311,23 +216,12 @@ export function saveAdminShowcaseSamples(samples: ShowcaseAudioSample[]): void {
 }
 
 export function loadAdminSubscriptions(): AdminSubscription[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SUBSCRIPTIONS);
-    if (!raw) return INITIAL_SUBSCRIPTIONS;
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-  } catch (e) {
-    console.warn('Failed to load subscriptions from storage:', e);
-  }
-  return INITIAL_SUBSCRIPTIONS;
+  // Payment records are authoritative in PostgreSQL; never read browser-local demo data.
+  return [];
 }
 
-export function saveAdminSubscriptions(subs: AdminSubscription[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEYS.SUBSCRIPTIONS, JSON.stringify(subs));
-  } catch (e) {
-    console.warn('Failed to save subscriptions to storage:', e);
-  }
+export function saveAdminSubscriptions(_subs: AdminSubscription[]): void {
+  // Subscription persistence is handled exclusively by the protected server API.
 }
 
 export function loadAdminAISettings(): AdminAISettings {
