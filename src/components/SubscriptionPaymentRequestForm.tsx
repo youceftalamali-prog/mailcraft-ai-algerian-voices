@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 
-type Props = { currentUserEmail?: string|null; billingCycle: 'monthly'|'annual' };
-export const SubscriptionPaymentRequestForm: React.FC<Props> = ({ currentUserEmail, billingCycle }) => {
-  const [plan,setPlan] = useState<'starter'|'pro'|'business'>('starter');
+type Props = { currentUserEmail?: string|null; billingCycle: 'monthly'|'annual'; initialPlan?: 'starter'|'pro'|'business' };
+export const SubscriptionPaymentRequestForm: React.FC<Props> = ({ currentUserEmail, billingCycle, initialPlan = 'starter' }) => {
+  const [plan,setPlan] = useState<'starter'|'pro'|'business'>(initialPlan);
   const [method,setMethod] = useState<'baridimob'|'edahabia'>('baridimob');
   const [reference,setReference] = useState('');
   const [sender,setSender] = useState('');
