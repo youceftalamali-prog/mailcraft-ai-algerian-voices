@@ -36,6 +36,7 @@ import {
   createSubscriptionPaymentRequest,
   getUserSubscriptionPaymentRequests,
   listSubscriptionPaymentRequests,
+  getSubscriptionPaymentReceipt,
   reviewSubscriptionPaymentRequest,
   ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
 } from './src/server/security';
