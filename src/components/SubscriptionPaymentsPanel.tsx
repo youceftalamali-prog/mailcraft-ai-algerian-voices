@@ -7,7 +7,7 @@ type PaymentRequest = {
   paymentMethod: 'baridimob'|'edahabia'; transactionReference: string;
   senderName: string|null; receiptNote: string|null;
   status: 'pending'|'approved'|'rejected'; reviewedAt: string|null;
-  rejectionReason: string|null; createdAt: string;
+  rejectionReason: string|null; receiptAvailable: boolean; createdAt: string;
 };
 
 const planNames = { starter: 'Starter', pro: 'Pro E-Commerce', business: 'Agency' };
