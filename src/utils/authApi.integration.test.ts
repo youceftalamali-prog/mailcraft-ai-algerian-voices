@@ -224,6 +224,24 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     assert.equal(activatedUser.rows[0]?.plan, 'starter');
     assert.equal(Number(activatedUser.rows[0]?.monthly_generations_limit), 50);
     assert.ok(activatedUser.rows[0]?.subscription_expires_at, 'approval must set a subscription expiry');
+    await getDatabasePool().query(
+      "UPDATE app_users SET monthly_generations_used=50, monthly_usage_resets_at=NOW() - INTERVAL '1 day' WHERE id=$1",
+      [signup.user.id],
+    );
+    const allowanceResetResponse = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: paymentCookie } });
+    const allowanceReset = await allowanceResetResponse.json() as { user?: { plan: string; monthlyGenerationsUsed: number } };
+    assert.equal(allowanceReset.user?.plan, 'starter');
+    assert.equal(allowanceReset.user?.monthlyGenerationsUsed, 0, 'paid allowance must reset at the monthly boundary');
+
+    await getDatabasePool().query(
+      "UPDATE app_users SET subscription_expires_at=NOW() - INTERVAL '1 second' WHERE id=$1",
+      [signup.user.id],
+    );
+    const expiredPlanResponse = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: paymentCookie } });
+    const expiredPlan = await expiredPlanResponse.json() as { user?: { plan: string; monthlyGenerationsLimit: number } };
+    assert.equal(expiredPlan.user?.plan, 'free', 'expired subscriptions must be downgraded server-side');
+    assert.equal(expiredPlan.user?.monthlyGenerationsLimit, 0);
+
 
     const repeatedApproval = await fetch(`${baseUrl}/api/admin/subscription-requests/${paymentRequestPayload.request.id}`, {
       method: 'PATCH',
