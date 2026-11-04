@@ -31,7 +31,7 @@ import {
   AlgiersPersonaId,
   ALGIERS_PERSONA_REGISTRY,
 } from '../services/algerianPersonaVoiceService';
-import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';
+import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';\nimport { SubscriptionPaymentRequestForm } from './SubscriptionPaymentRequestForm';
 import {
   ShowcaseAudioSample,
   INITIAL_SHOWCASE_SAMPLES,
@@ -1041,13 +1041,13 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
           <div className="text-center max-w-3xl mx-auto mb-10">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-bold border border-emerald-500/30 mb-3">
               <CreditCard className="w-3.5 h-3.5" />
-              <span>طرق الدفع الجزائرية المعتمدة (100% محلي)</span>
+              <span>طلبات الدفع المحلية - مراجعة يدوية</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white">
-              الدفع الفوري السهل عبر بريدي موب (BaridiMob) والبطاقة الذهبية 💳🇩🇿
+              الدفع عبر التحويل البريدي 💳🇩🇿
             </h2>
             <p className="text-sm text-slate-300 mt-2">
-              نوفر للتجار في الجزائر إمكانية التفعيل الفوري لاشتراكاتهم عبر الوسائل المحلية الموثوقة بدون تعقيدات البنوك الأجنبية.
+              أرسل طلب اشتراك بعد إتمام التحويل. لا يتم تفعيل الباقة إلا بعد التحقق من وصول المبلغ فعلياً.
             </p>
           </div>
 
@@ -1069,34 +1069,11 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                 </span>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] text-slate-400">رقم الحساب البريدي الجاري RIP:</div>
-                  <div className="text-sm font-mono font-bold text-emerald-400 mt-0.5" dir="ltr">
-                    00799999002345678921
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCopyRip}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  {copiedRip ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>تم النسخ</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>نسخ RIP</span>
-                    </>
-                  )}
-                </button>
+              <div className="rounded-xl bg-slate-900 border border-slate-700 p-4 text-xs text-slate-300 leading-6">
+                بيانات الحساب البريدي الرسمية ستظهر هنا بعد تأكيد صاحب المنصة لها. لا تحوّل أي مبلغ إلى رقم غير موثّق.
               </div>
-
               <p className="text-xs text-slate-400 leading-relaxed">
-                بعد التحويل عبر تطبيق BaridiMob، أرسل صورة الإشعار (Reçu) مع إيميل حسابك عبر WhatsApp أو إلى الدعم ليتم تفعيل باقتك مباشرة خلال أقل من 15 دقيقة.
+                بعد إتمام التحويل، أدخل رقم مرجع العملية في نموذج طلب الاشتراك أدناه. ستتم مراجعة وصول المبلغ يدوياً.
               </p>
             </div>
 
@@ -1109,26 +1086,27 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   </div>
                   <div>
                     <h3 className="text-base font-extrabold text-white">البطاقة الذهبية (Edahabia)</h3>
-                    <p className="text-xs text-slate-400">دفع آمن عبر موزع بريد الجزائر SATIM</p>
+                    <p className="text-xs text-slate-400">تحويل بريدي - مراجعة يدوية</p>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  تأكيد آلي
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  غير مربوط ببوابة إلكترونية
                 </span>
               </div>
 
               <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
-                <ShieldCheck className="w-6 h-6 text-emerald-400 shrink-0" />
+                <AlertCircle className="w-6 h-6 text-amber-400 shrink-0" />
                 <div className="text-xs text-slate-300">
-                  معاملات مشفرة 100% مع نظام الحماية الثلاثي OTP عبر الرسائل النصية القصيرة (SMS).
+                  لا تدخل بيانات البطاقة أو رمز OTP داخل هذا الموقع. لا توجد حالياً بوابة SATIM مفعّلة.
                 </div>
               </div>
 
               <p className="text-xs text-slate-400 leading-relaxed">
-                ادخل رقم بطاقتك وتاريخ الصلاحية ورمز التحقق عبر بوابة الدفع الوطنية، ويتم تجديد اشتراكك الصوتي فوراً وبشكل تلقائي.
+                لا يمكن الدفع بالبطاقة مباشرة حالياً. استخدم التحويل البريدي بعد استلام بيانات الحساب الرسمية، ثم أرسل مرجع العملية للمراجعة.
               </p>
             </div>
           </div>
+          <SubscriptionPaymentRequestForm currentUserEmail={currentUserEmail} billingCycle={billingCycle} />
         </div>
       </section>
 
