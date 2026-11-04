@@ -52,6 +52,18 @@ interface PublicPricingWithAudioPreviewProps {
   currentUserEmail?: string | null;
 }
 
+const GOOGLE_CLIENT_ID = '144615124580-lv0vnbh21na92ooh261sgloj6dsdlvo8.apps.googleusercontent.com';
+
+type GoogleIdentityCredential = { credential?: string };
+type GoogleIdentityApi = {
+  accounts: {
+    id: {
+      initialize(options: { client_id: string; callback: (response: GoogleIdentityCredential) => void }): void;
+      renderButton(element: HTMLElement, options: Record<string, string>): void;
+    };
+  };
+};
+
 const SHOWCASE_SAMPLES: ShowcaseAudioSample[] = [
   {
     id: 'sample-commercial',
@@ -185,10 +197,80 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
   const [authRememberMe, setAuthRememberMe] = useState(true);
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false);
   const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
+  const [isGoogleAuthLoading, setIsGoogleAuthLoading] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const [copiedRip, setCopiedRip] = useState(false);
 
   // FAQ Accordion State
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+
+  // Google Identity Services returns an ID token; the API verifies it server-side.
+  useEffect(() => {
+    const container = googleButtonRef.current;
+    if (!container) return;
+
+    const renderGoogleButton = () => {
+      const google = (window as Window & { google?: GoogleIdentityApi }).google;
+      if (!google?.accounts?.id || !googleButtonRef.current) return;
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: async ({ credential }) => {
+          if (!credential) {
+            setAuthSuccessMessage('لم يصل رمز التحقق من Google. أعد المحاولة.');
+            return;
+          }
+          setIsGoogleAuthLoading(true);
+          setAuthSuccessMessage(null);
+          try {
+            const response = await fetch('/api/auth/google', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ credential }),
+            });
+            const data = await response.json().catch(() => ({})) as AuthResponse;
+            if (!response.ok || !data.success || !data.user?.email) {
+              setAuthSuccessMessage(data.message || 'تعذر تسجيل الدخول عبر Google.');
+              return;
+            }
+            setAuthSuccessMessage('تم تسجيل الدخول عبر Google بنجاح.');
+            onLoginSuccess?.(data.user.email);
+            window.setTimeout(() => onEnterStudio(), 700);
+          } catch {
+            setAuthSuccessMessage('تعذر الاتصال بالخادم. لم يتم تسجيل الدخول.');
+          } finally {
+            setIsGoogleAuthLoading(false);
+          }
+        },
+      });
+      google.accounts.id.renderButton(googleButtonRef.current, {
+        type: 'standard',
+        theme: 'filled_black',
+        size: 'large',
+        text: authMode === 'signup' ? 'signup_with' : 'signin_with',
+        shape: 'pill',
+        width: '320',
+        locale: 'ar',
+      });
+    };
+
+    const existingScript = document.getElementById('google-identity-services');
+    if ((window as Window & { google?: GoogleIdentityApi }).google?.accounts?.id) {
+      renderGoogleButton();
+      return;
+    }
+    const script = existingScript instanceof HTMLScriptElement
+      ? existingScript
+      : document.createElement('script');
+    if (!existingScript) {
+      script.id = 'google-identity-services';
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', renderGoogleButton);
+    return () => script.removeEventListener('load', renderGoogleButton);
+  }, [authMode, onEnterStudio, onLoginSuccess]);
 
   // Clean up audio on unmount
   useEffect(() => {
@@ -1108,8 +1190,16 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               </div>
             )}
 
-            <div className="mb-5 p-3 rounded-xl bg-amber-950/30 border border-amber-500/30 text-amber-200 text-xs leading-6">
-              تسجيل الدخول عبر Google والدخول السريع للمالك متوقفان مؤقتاً إلى حين إعداد OAuth والتحقق الآمن. استعمل البريد الإلكتروني وكلمة المرور.
+            <div className="mb-5 flex flex-col items-center gap-3">
+              <div ref={googleButtonRef} className="min-h-10 flex justify-center" />
+              {isGoogleAuthLoading && (
+                <p className="text-xs text-indigo-300" role="status">جارٍ التحقق من حساب Google...</p>
+              )}
+              <div className="flex items-center gap-3 w-full text-[11px] text-slate-500">
+                <span className="h-px flex-1 bg-slate-700" />
+                <span>أو عبر البريد الإلكتروني</span>
+                <span className="h-px flex-1 bg-slate-700" />
+              </div>
             </div>
 
             {/* Method 2: Traditional Email & Password Form */}
