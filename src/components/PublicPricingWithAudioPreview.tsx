@@ -200,7 +200,6 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
   const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
   const [isGoogleAuthLoading, setIsGoogleAuthLoading] = useState(false);
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
-  const [copiedRip, setCopiedRip] = useState(false);
 
   // FAQ Accordion State
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
