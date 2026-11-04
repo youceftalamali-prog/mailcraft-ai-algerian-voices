@@ -397,12 +397,6 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
     }
   };
 
-  const handleCopyRip = () => {
-    navigator.clipboard.writeText('00799999002345678921');
-    setCopiedRip(true);
-    setTimeout(() => setCopiedRip(false), 2500);
-  };
-
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
@@ -1062,7 +1056,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   </div>
                   <div>
                     <h3 className="text-base font-extrabold text-white">تطبيق بريدي موب (BaridiMob)</h3>
-                    <p className="text-xs text-slate-400">تحويل فوري برقم الـ RIP</p>
+                    <p className="text-xs text-slate-400">بيانات التحويل الرسمية بعد تأكيدها</p>
                   </div>
                 </div>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -1333,7 +1327,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             },
             {
               q: 'كيف يتم الدفع عبر بريدي موب (BaridiMob)؟',
-              a: 'يمكنك إرسال مبلغ الاشتراك مباشرة إلى رقم الحساب البريدي الجاري (RIP: 00799999002345678921) عبر تطبيق بريدي موب، ثم إرسال صورة وصل التحويل للدعم ليتم تفعيل حسابك مباشرة خلال 15 دقيقة.',
+              a: 'بعد تأكيد بيانات الحساب الرسمية، يمكنك إجراء التحويل وإرسال رقم مرجع العملية من نموذج طلب الاشتراك. تبقى الباقة غير مفعّلة حتى يتحقق المدير من وصول المبلغ فعلياً.',
             },
             {
               q: 'هل يُسمح باستخدام الملفات الصوتية في إعلانات ممولة على فيسبوك وتيك توك؟',
