@@ -909,7 +909,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   onClick={() => scrollToSection('payment-methods')}
                   className="w-full inline-flex items-center justify-center py-3 px-4 rounded-xl text-xs font-bold text-indigo-300 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 transition-all cursor-pointer"
                 >
-                  الدفع بـ بريدي موب (2,900 دج)
+                  إرسال طلب الدفع ({billingCycle === 'monthly' ? '2,900' : '29,000'} دج)
                 </button>
               </div>
             </div>
@@ -970,7 +970,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   onClick={() => scrollToSection('payment-methods')}
                   className="w-full inline-flex items-center justify-center py-3.5 px-4 rounded-xl text-sm font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-lg shadow-emerald-500/30 transition-all cursor-pointer"
                 >
-                  اشترك الآن في Pro (5,900 دج)
+                  إرسال طلب Pro ({billingCycle === 'monthly' ? '5,900' : '59,000'} دج)
                 </button>
               </div>
             </div>
@@ -1022,7 +1022,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   onClick={() => scrollToSection('payment-methods')}
                   className="w-full inline-flex items-center justify-center py-3 px-4 rounded-xl text-xs font-bold text-slate-200 bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
                 >
-                  طلب اشتراك وكالة (14,500 دج)
+                  إرسال طلب Agency ({billingCycle === 'monthly' ? '14,500' : '145,000'} دج)
                 </button>
               </div>
             </div>
@@ -1060,7 +1060,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   </div>
                 </div>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  تفعيل سريع
+                  مراجعة بعد التحقق
                 </span>
               </div>
 
