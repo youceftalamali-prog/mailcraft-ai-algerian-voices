@@ -150,6 +150,14 @@ export function verifyPassword(password: string, salt: string, expectedHash: str
 }
 
 export async function getUserById(id: string): Promise<ServerUser | null> {
+  // Expired subscriptions are downgraded on the server before any session
+  // request can use their paid entitlements.
+  await getDatabasePool().query(`
+    UPDATE app_users SET plan='free', monthly_generations_used=0,
+      monthly_generations_limit=0, subscription_expires_at=NULL
+    WHERE id=$1 AND role='user' AND plan <> 'free'
+      AND subscription_expires_at IS NOT NULL AND subscription_expires_at <= NOW()
+  `, [id]);
   const r = await getDatabasePool().query('SELECT * FROM app_users WHERE id=$1', [id]);
   return r.rows[0] ? userFromRow(r.rows[0]) : null;
 }
@@ -393,12 +401,13 @@ export async function reviewSubscriptionPaymentRequest(input: {
     if (input.decision === 'approved') {
       const months = payment.billingCycle === 'annual' ? 12 : 1;
       const limits: Record<SubscriptionPlan, number> = { starter: 50, pro: 9999, business: 9999 };
-      await client.query(`
+      const userUpdate = await client.query(`
         UPDATE app_users SET plan=$2, monthly_generations_used=0,
           monthly_generations_limit=$3,
-          subscription_expires_at=NOW() + ($4::integer * INTERVAL '1 month')
+          subscription_expires_at=GREATEST(COALESCE(subscription_expires_at,NOW()),NOW()) + ($4::integer * INTERVAL '1 month')
         WHERE id=$1 AND role='user'
       `, [payment.userId,payment.plan,limits[payment.plan],months]);
+      if (userUpdate.rowCount !== 1) throw new Error('SUBSCRIPTION_USER_NOT_ELIGIBLE');
     }
     const updated = await client.query(`
       UPDATE subscription_payment_requests
