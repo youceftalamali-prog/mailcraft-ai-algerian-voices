@@ -80,6 +80,7 @@ async function createAuthStoreSchema(): Promise<void> {
         UNIQUE(payment_method, transaction_reference)
       )
     `);
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS subscription_payment_requests_one_pending_per_user_idx ON subscription_payment_requests(user_id) WHERE status=\'pending\'');
     await client.query('CREATE INDEX IF NOT EXISTS subscription_payment_requests_status_created_idx ON subscription_payment_requests(status, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS subscription_payment_requests_user_idx ON subscription_payment_requests(user_id, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id)');
@@ -340,12 +341,13 @@ export async function createSubscriptionPaymentRequest(input: {
   const client = await getDatabasePool().connect();
   try {
     await client.query('BEGIN');
+    await client.query('SELECT id FROM app_users WHERE id=$1 FOR UPDATE', [input.userId]);
     const pending = await client.query(
       "SELECT id FROM subscription_payment_requests WHERE user_id=$1 AND status='pending' FOR UPDATE",
       [input.userId],
     );
     if (pending.rowCount) throw new Error('PENDING_PAYMENT_EXISTS');
-    const result = await client.query(`
+    await client.query(`
       INSERT INTO subscription_payment_requests
         (id,user_id,plan,billing_cycle,amount_dzd,payment_method,transaction_reference,sender_name,receipt_note)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
