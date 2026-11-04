@@ -31,7 +31,8 @@ import {
   AlgiersPersonaId,
   ALGIERS_PERSONA_REGISTRY,
 } from '../services/algerianPersonaVoiceService';
-import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';\nimport { SubscriptionPaymentRequestForm } from './SubscriptionPaymentRequestForm';
+import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';
+import { SubscriptionPaymentRequestForm } from './SubscriptionPaymentRequestForm';
 import {
   ShowcaseAudioSample,
   INITIAL_SHOWCASE_SAMPLES,
