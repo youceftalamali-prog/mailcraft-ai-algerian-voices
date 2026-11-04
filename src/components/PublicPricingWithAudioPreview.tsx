@@ -1030,7 +1030,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
         </div>
       </section>
 
-      {/* SECTION 3: Algerian Local Payment Methods (بريدي موب والبطاقة الذهبية) */}
+      {/* SECTION 3: Local Manual Payment Requests */}
       <section id="payment-methods" className="py-16 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="rounded-3xl bg-slate-900 border border-indigo-500/30 p-6 sm:p-10 shadow-2xl relative overflow-hidden">
           <div className="text-center max-w-3xl mx-auto mb-10">
@@ -1393,7 +1393,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               onClick={() => scrollToSection('payment-methods')}
               className="hover:text-white transition-colors cursor-pointer"
             >
-              بريدي موب والذهبية
+              طرق الدفع
             </button>
             <button onClick={onEnterStudio} className="text-emerald-400 hover:underline cursor-pointer">
               الاستوديو المباشر
