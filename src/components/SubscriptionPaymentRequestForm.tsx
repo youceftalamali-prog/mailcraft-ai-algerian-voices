@@ -10,7 +10,8 @@ export const SubscriptionPaymentRequestForm: React.FC<Props> = ({ currentUserEma
   const [receiptDataUrl,setReceiptDataUrl] = useState('');
   const [receiptFilename,setReceiptFilename] = useState('');
   const [busy,setBusy] = useState(false);
-  const [message,setMessage] = useState<{ok:boolean;text:string}|null>(null);\n  useEffect(() => setPlan(initialPlan), [initialPlan]);
+  const [message,setMessage] = useState<{ok:boolean;text:string}|null>(null);
+  useEffect(() => setPlan(initialPlan), [initialPlan]);
   const prices = { starter: {monthly:2900,annual:29000}, pro:{monthly:5900,annual:59000}, business:{monthly:14500,annual:145000} };
   const amount = prices[plan][billingCycle];
   const submit = async (event: React.FormEvent) => {
