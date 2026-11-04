@@ -61,6 +61,7 @@ async function createAuthStoreSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, ip TEXT NOT NULL DEFAULT 'unknown'
       )`);
     await client.query("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS subscription_expires_at TIMESTAMPTZ");
+    await client.query("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS monthly_usage_resets_at TIMESTAMPTZ");
     await client.query(`
       CREATE TABLE IF NOT EXISTS subscription_payment_requests (
         id TEXT PRIMARY KEY,
@@ -162,6 +163,7 @@ export async function getUserById(id: string): Promise<ServerUser | null> {
     WHERE id=$1 AND role='user' AND plan <> 'free'
       AND subscription_expires_at IS NOT NULL AND subscription_expires_at <= NOW()
   `, [id]);
+  await getDatabasePool().query(`\n    UPDATE app_users SET monthly_generations_used=0,\n      monthly_usage_resets_at=NOW() + INTERVAL '1 month'\n    WHERE id=$1 AND role='user' AND plan <> 'free'\n      AND monthly_usage_resets_at IS NOT NULL AND monthly_usage_resets_at <= NOW()\n  `, [id]);
   const r = await getDatabasePool().query('SELECT * FROM app_users WHERE id=$1', [id]);
   return r.rows[0] ? userFromRow(r.rows[0]) : null;
 }
