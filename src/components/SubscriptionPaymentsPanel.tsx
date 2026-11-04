@@ -92,6 +92,7 @@ export const SubscriptionPaymentsPanel: React.FC = () => {
               </div>
               {request.senderName && <p className="text-xs text-slate-300">اسم المرسل: {request.senderName}</p>}
               {request.receiptNote && <p className="text-xs text-slate-400 whitespace-pre-wrap">{request.receiptNote}</p>}
+              {request.receiptAvailable && <a href={`/api/admin/subscription-requests/${encodeURIComponent(request.id)}/receipt`} target="_blank" rel="noreferrer" className="inline-flex rounded-lg border border-indigo-600/50 px-3 py-2 text-xs font-bold text-indigo-300 hover:bg-indigo-950/40">عرض الإيصال المرفق</a>}
               {request.rejectionReason && <p className="text-xs text-red-300">سبب الرفض: {request.rejectionReason}</p>}
               {request.status === 'pending' && <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800">
                 <button type="button" disabled={busyId === request.id} onClick={() => void review(request, 'approved')} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50"><CheckCircle2 className="w-4 h-4" /> تأكيد الدفع وتفعيل الباقة</button>
