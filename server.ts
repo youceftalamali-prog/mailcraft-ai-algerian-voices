@@ -1251,7 +1251,7 @@ app.post('/api/subscriptions/requests', subscriptionPaymentLimiter, requireAuth,
   const { plan, billingCycle, paymentMethod, transactionReference, senderName, receiptNote } = req.body || {};
   if (!['starter','pro','business'].includes(plan)
     || !['monthly','annual'].includes(billingCycle)
-    || !['baridimob','edahabia'].includes(paymentMethod)
+    || paymentMethod !== 'baridimob'
     || typeof transactionReference !== 'string'
     || typeof senderName !== 'undefined' && typeof senderName !== 'string'
     || typeof receiptNote !== 'undefined' && typeof receiptNote !== 'string') {
