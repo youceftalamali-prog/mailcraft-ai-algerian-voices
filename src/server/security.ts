@@ -221,7 +221,8 @@ export async function createUser(email: string, password: string): Promise<Serve
 export async function authenticateUser(email: string, password: string): Promise<ServerUser | null> {
   const user = await getUserByEmail(email);
   if (!user?.passwordHash || !user.salt || !verifyPassword(password, user.salt, user.passwordHash)) return null;
-  return updateUser(user.id, { lastLoginAt: new Date().toISOString() });
+  const updated = await updateUser(user.id, { lastLoginAt: new Date().toISOString() });
+  return updated ? getUserById(updated.id) : null;
 }
 export async function setUserPassword(id: string, password: string): Promise<ServerUser | null> {
   if (password.length < 16 || password.length > 128) return null;
