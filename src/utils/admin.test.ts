@@ -8,18 +8,9 @@ import {
   ShowcaseAudioSample,
 } from '../services/adminStore.ts';
 
-test('INITIAL_SUBSCRIPTIONS includes SunVera Jolie and Algerian payment methods', () => {
-  assert.ok(INITIAL_SUBSCRIPTIONS.length >= 3, 'Should have initial subscription seed records');
-  
-  const sunvera = INITIAL_SUBSCRIPTIONS.find((s) => s.storeName.includes('SunVera Jolie'));
-  assert.ok(sunvera, 'Must contain SunVera Jolie store');
-  assert.equal(sunvera?.paymentMethod, 'baridimob', 'SunVera Jolie should use BaridiMob');
-  assert.ok(sunvera?.transactionId.startsWith('BM-'), 'Should have BaridiMob transaction ID');
-  assert.equal(sunvera?.status, 'pending', 'SunVera Jolie should be pending verification');
-
-  const edahabiaSub = INITIAL_SUBSCRIPTIONS.find((s) => s.paymentMethod === 'edahabia');
-  assert.ok(edahabiaSub, 'Must contain an Edahabia subscription');
-  assert.ok(edahabiaSub?.transactionId.startsWith('SATIM-'), 'Edahabia should have SATIM transaction reference');
+test('subscription records are not seeded in browser storage', () => {
+  assert.equal(INITIAL_SUBSCRIPTIONS.length, 0,
+    'payment requests must be loaded from PostgreSQL, not fake local demo records');
 });
 
 test('INITIAL_SHOWCASE_SAMPLES contains 7 Algiers personas with valid data', () => {
@@ -43,9 +34,21 @@ test('INITIAL_SHOWCASE_SAMPLES contains 7 Algiers personas with valid data', () 
 
 test('Subscription status transition from pending to active updates activation timestamp', () => {
   const sampleSub: AdminSubscription = {
-    ...INITIAL_SUBSCRIPTIONS[0],
+    id: 'test-payment',
+    storeName: 'Test Store',
+    ownerName: 'Test Owner',
+    email: 'test@example.test',
+    phone: '0550000000',
+    wilaya: '16 - الجزائر',
+    plan: 'starter',
+    planLabel: 'Starter',
+    amountDzd: 2900,
+    paymentMethod: 'baridimob',
+    transactionId: 'TEST-TRANSFER-001',
     status: 'pending',
-    activatedAt: undefined,
+    createdAt: '2026-11-04 10:00',
+    adGenerationsUsed: 0,
+    adGenerationsLimit: 50,
   };
 
   // Simulate activation
