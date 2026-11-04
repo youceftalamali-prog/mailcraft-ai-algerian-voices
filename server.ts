@@ -32,8 +32,7 @@ import {
   getUserByEmail,
   updateUser,
   consumeGenerationAllowance,
-  getAllUsers,
-  ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
+  getAllUsers,\n  createSubscriptionPaymentRequest,\n  getUserSubscriptionPaymentRequests,\n  listSubscriptionPaymentRequests,\n  reviewSubscriptionPaymentRequest,\n  ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
 } from './src/server/security';
 
 export const app = express();
@@ -1233,7 +1232,83 @@ app.post('/api/admin/verify-api-key', adminLimiter, requireAdmin, async (req: Re
   }
 });
 
-// Endpoint: Admin System Stats (Protected by requireAdmin)
+
+const subscriptionPaymentLimiter = rateLimiter({
+  windowMs: 60 * 60 * 1000,
+  maxRequests: 5,
+  message: 'تم تجاوز عدد طلبات الدفع. حاول لاحقاً.',
+});
+
+// Customers submit a payment reference after completing a manual transfer.
+// The server derives the price from the selected plan and billing cycle.
+app.post('/api/subscriptions/requests', subscriptionPaymentLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const { plan, billingCycle, paymentMethod, transactionReference, senderName, receiptNote } = req.body || {};
+  if (!['starter','pro','business'].includes(plan)
+    || !['monthly','annual'].includes(billingCycle)
+    || !['baridimob','edahabia'].includes(paymentMethod)
+    || typeof transactionReference !== 'string'
+    || typeof senderName !== 'undefined' && typeof senderName !== 'string'
+    || typeof receiptNote !== 'undefined' && typeof receiptNote !== 'string') {
+    res.status(400).json({ error: 'INVALID_PAYMENT_REQUEST', message: 'بيانات طلب الدفع غير مكتملة أو غير صالحة.' });
+    return;
+  }
+  try {
+    const request = await createSubscriptionPaymentRequest({
+      userId: req.user!.id, plan, billingCycle, paymentMethod, transactionReference,
+      senderName, receiptNote,
+    });
+    res.status(201).json({ success: true, request });
+  } catch (error: any) {
+    const code = error instanceof Error ? error.message : '';
+    const known: Record<string, { status: number; message: string }> = {
+      INVALID_TRANSACTION_REFERENCE: { status: 400, message: 'رقم مرجع التحويل يجب أن يكون بين 5 و100 حرف.' },
+      PENDING_PAYMENT_EXISTS: { status: 409, message: 'لديك طلب دفع قيد المراجعة بالفعل.' },
+      DUPLICATE_TRANSACTION_REFERENCE: { status: 409, message: 'رقم المعاملة مستخدم من قبل. تحقق من الرقم.' },
+    };
+    const issue = known[code];
+    if (issue) { res.status(issue.status).json({ error: code, message: issue.message }); return; }
+    throw error;
+  }
+});
+
+app.get('/api/subscriptions/requests', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const requests = await getUserSubscriptionPaymentRequests(req.user!.id);
+  res.json({ success: true, requests });
+});
+
+app.get('/api/admin/subscription-requests', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const status = req.query.status;
+  if (status !== undefined && !['pending','approved','rejected'].includes(String(status))) {
+    res.status(400).json({ error: 'INVALID_STATUS' }); return;
+  }
+  const requests = await listSubscriptionPaymentRequests(status as 'pending'|'approved'|'rejected'|undefined);
+  res.json({ success: true, requests });
+});
+
+app.patch('/api/admin/subscription-requests/:id', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const { decision, rejectionReason } = req.body || {};
+  if (!['approved','rejected'].includes(decision)
+    || typeof rejectionReason !== 'undefined' && typeof rejectionReason !== 'string') {
+    res.status(400).json({ error: 'INVALID_REVIEW_DECISION' }); return;
+  }
+  try {
+    const request = await reviewSubscriptionPaymentRequest({
+      requestId: req.params.id, adminUserId: req.user!.id, decision, rejectionReason,
+    });
+    res.json({ success: true, request });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : '';
+    const known: Record<string, { status: number; message: string }> = {
+      PAYMENT_REQUEST_NOT_FOUND: { status: 404, message: 'طلب الدفع غير موجود.' },
+      PAYMENT_REQUEST_ALREADY_REVIEWED: { status: 409, message: 'تمت مراجعة هذا الطلب مسبقاً.' },
+    };
+    const issue = known[code];
+    if (issue) { res.status(issue.status).json({ error: code, message: issue.message }); return; }
+    throw error;
+  }
+});
+
+\n// Endpoint: Admin System Stats (Protected by requireAdmin)
 app.get('/api/admin/system-stats', adminLimiter, requireAdmin, (_req: Request, res: Response): void => {
   res.json({
     platformName: 'صوت التجارة DZ - استوديو الإعلانات العاصمية',
