@@ -169,7 +169,8 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
   const isAdmin = isAdminUser(currentUserEmail);
 
   // Billing cycle toggle: monthly vs annual
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');\n  const [selectedPaymentPlan, setSelectedPaymentPlan] = useState<'starter'|'pro'|'business'>('starter');
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [selectedPaymentPlan, setSelectedPaymentPlan] = useState<'starter'|'pro'|'business'>('starter');
 
   // Samples are loaded from the shared server state by App, never from visitor localStorage.
   const [liveSamples, setLiveSamples] = useState<ShowcaseAudioSample[]>(() =>
@@ -445,7 +446,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             >
               باقات الأسعار (دج)
             </button>
-            <button
+              onClick={() => scrollToSection('payment-methods')}
               onClick={() => { setSelectedPaymentPlan('starter'); scrollToSection('payment-methods'); }}
               className="hover:text-emerald-400 transition-colors cursor-pointer"
             >
@@ -905,7 +906,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               <div className="mt-8">
                 <button
                   type="button"
-                  onClick={() => { setSelectedPaymentPlan('pro'); scrollToSection('payment-methods'); }}
+                  onClick={() => { setSelectedPaymentPlan('starter'); scrollToSection('payment-methods'); }}
                   className="w-full inline-flex items-center justify-center py-3 px-4 rounded-xl text-xs font-bold text-indigo-300 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 transition-all cursor-pointer"
                 >
                   إرسال طلب الدفع ({billingCycle === 'monthly' ? '2,900' : '29,000'} دج)
@@ -966,7 +967,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               <div className="mt-8">
                 <button
                   type="button"
-                  onClick={() => { setSelectedPaymentPlan('business'); scrollToSection('payment-methods'); }}
+                  onClick={() => { setSelectedPaymentPlan('pro'); scrollToSection('payment-methods'); }}
                   className="w-full inline-flex items-center justify-center py-3.5 px-4 rounded-xl text-sm font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-lg shadow-emerald-500/30 transition-all cursor-pointer"
                 >
                   إرسال طلب Pro ({billingCycle === 'monthly' ? '5,900' : '59,000'} دج)
@@ -1018,7 +1019,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               <div className="mt-8">
                 <button
                   type="button"
-                  onClick={() => scrollToSection('payment-methods')}
+                  onClick={() => { setSelectedPaymentPlan('business'); scrollToSection('payment-methods'); }}
                   className="w-full inline-flex items-center justify-center py-3 px-4 rounded-xl text-xs font-bold text-slate-200 bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
                 >
                   إرسال طلب Agency ({billingCycle === 'monthly' ? '14,500' : '145,000'} دج)
