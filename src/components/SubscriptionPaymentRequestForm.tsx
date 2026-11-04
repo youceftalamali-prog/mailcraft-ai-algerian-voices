@@ -40,7 +40,7 @@ export const SubscriptionPaymentRequestForm: React.FC<Props> = ({ currentUserEma
       <div className="rounded-lg bg-slate-900 border border-slate-700 p-2.5"><p className="text-xs text-slate-400">المبلغ المطلوب</p><p className="text-lg font-black text-emerald-300 mt-1">{amount.toLocaleString('fr-DZ')} دج</p></div>
     </div>
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <label className="text-xs text-slate-300">وسيلة الدفع<select value={method} onChange={e=>setMethod(e.target.value as typeof method)} className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-700 p-2.5 text-white"><option value="baridimob">BaridiMob</option><option value="edahabia">البطاقة الذهبية / تحويل بريدي</option></select></label>
+      <label className="text-xs text-slate-300">وسيلة الدفع<select value={method} onChange={e=>setMethod(e.target.value as typeof method)} className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-700 p-2.5 text-white"><option value="baridimob">BaridiMob / تحويل بريدي</option><option value="edahabia" disabled>البطاقة الذهبية - غير متاحة حتى ربط بوابة SATIM</option></select></label>
       <label className="text-xs text-slate-300">رقم مرجع المعاملة *<input required minLength={5} maxLength={100} value={reference} onChange={e=>setReference(e.target.value)} placeholder="أدخل رقم العملية كما يظهر في الإشعار" className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-700 p-2.5 text-white" /></label>
     </div>
     <label className="block text-xs text-slate-300">اسم صاحب الحساب المحوِّل (اختياري)<input maxLength={120} value={sender} onChange={e=>setSender(e.target.value)} className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-700 p-2.5 text-white" /></label>
