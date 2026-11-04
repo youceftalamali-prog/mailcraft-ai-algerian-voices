@@ -184,7 +184,7 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
       method: 'POST',
       headers: { cookie: paymentCookie, 'content-type': 'application/json' },
       body: JSON.stringify({
-        plan: 'pro', billingCycle: 'annual', paymentMethod: 'edahabia',
+        plan: 'pro', billingCycle: 'annual', paymentMethod: 'baridimob',
         transactionReference: `CI-SECOND-${Date.now()}`,
       }),
     });
