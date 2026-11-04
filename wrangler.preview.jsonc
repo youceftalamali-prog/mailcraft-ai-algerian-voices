@@ -15,6 +15,9 @@
       "/api/*"
     ]
   },
+  "vars": {
+    "GOOGLE_CLIENT_ID": "144615124580-lv0vnbh21na92ooh261sgloj6dsdlvo8.apps.googleusercontent.com"
+  },
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",

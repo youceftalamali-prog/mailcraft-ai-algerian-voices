@@ -9,6 +9,7 @@ export interface ServerUser {
   role: 'admin' | 'user'; plan: 'free' | 'starter' | 'pro' | 'business';
   trialGenerationsUsed: number; trialGenerationsLimit: number;
   monthlyGenerationsUsed: number; monthlyGenerationsLimit: number;
+  subscriptionExpiresAt?: string | null;
   createdAt: string; lastLoginAt: string;
 }
 export interface ServerSession {
@@ -25,6 +26,7 @@ const userFromRow = (r: any): ServerUser => ({
   monthlyGenerationsUsed: Number(r.monthly_generations_used),
   monthlyGenerationsLimit: Number(r.monthly_generations_limit),
   createdAt: new Date(r.created_at).toISOString(),
+  subscriptionExpiresAt: r.subscription_expires_at ? new Date(r.subscription_expires_at).toISOString() : null,
   lastLoginAt: new Date(r.last_login_at).toISOString(),
 });
 const sessionFromRow = (r: any, token: string): ServerSession => ({
@@ -58,8 +60,64 @@ async function createAuthStoreSchema(): Promise<void> {
         user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
         created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, ip TEXT NOT NULL DEFAULT 'unknown'
       )`);
+    await client.query("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS subscription_expires_at TIMESTAMPTZ");
+    await client.query("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS monthly_usage_resets_at TIMESTAMPTZ");
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS subscription_payment_requests (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        plan TEXT NOT NULL CHECK (plan IN ('starter','pro','business')),
+        billing_cycle TEXT NOT NULL CHECK (billing_cycle IN ('monthly','annual')),
+        amount_dzd INTEGER NOT NULL CHECK (amount_dzd > 0),
+        payment_method TEXT NOT NULL CHECK (payment_method IN ('baridimob','edahabia')),
+        transaction_reference TEXT NOT NULL,
+        sender_name TEXT,
+        receipt_note TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+        reviewed_by TEXT,
+        reviewed_at TIMESTAMPTZ,
+        rejection_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(payment_method, transaction_reference)
+      )
+    `);
+    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_data BYTEA');
+    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_mime_type TEXT');
+    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_filename TEXT');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS subscription_payment_requests_one_pending_per_user_idx ON subscription_payment_requests(user_id) WHERE status=\'pending\'');
+    await client.query('CREATE INDEX IF NOT EXISTS subscription_payment_requests_status_created_idx ON subscription_payment_requests(status, created_at DESC)');
+    await client.query('CREATE INDEX IF NOT EXISTS subscription_payment_requests_user_idx ON subscription_payment_requests(user_id, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id)');
     await client.query('CREATE INDEX IF NOT EXISTS app_sessions_expires_at_idx ON app_sessions(expires_at)');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS showcase_audio_samples (
+        id TEXT PRIMARY KEY,
+        persona_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL,
+        persona_title TEXT NOT NULL,
+        avatar_icon TEXT NOT NULL,
+        accent_badge TEXT NOT NULL,
+        script_text TEXT NOT NULL,
+        duration_label TEXT NOT NULL,
+        voice_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        audio_data BYTEA,
+        audio_mime_type TEXT,
+        audio_sha256 TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS showcase_sample_state (
+        id SMALLINT PRIMARY KEY CHECK (id = 1),
+        initialized BOOLEAN NOT NULL DEFAULT FALSE
+      )`);
+    await client.query(`
+      INSERT INTO showcase_sample_state (id, initialized)
+      VALUES (1, FALSE)
+      ON CONFLICT (id) DO NOTHING
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS showcase_audio_samples_created_at_idx ON showcase_audio_samples(created_at DESC)');
     await client.query('DELETE FROM app_sessions WHERE expires_at <= NOW()');
     await client.query('COMMIT');
   } catch (error) {
@@ -97,6 +155,20 @@ export function verifyPassword(password: string, salt: string, expectedHash: str
 }
 
 export async function getUserById(id: string): Promise<ServerUser | null> {
+  // Expired subscriptions are downgraded on the server before any session
+  // request can use their paid entitlements.
+  await getDatabasePool().query(`
+    UPDATE app_users SET plan='free', monthly_generations_used=0,
+      monthly_generations_limit=0, subscription_expires_at=NULL
+    WHERE id=$1 AND role='user' AND plan <> 'free'
+      AND subscription_expires_at IS NOT NULL AND subscription_expires_at <= NOW()
+  `, [id]);
+  await getDatabasePool().query(`
+    UPDATE app_users SET monthly_generations_used=0,
+      monthly_usage_resets_at=NOW() + INTERVAL '1 month'
+    WHERE id=$1 AND role='user' AND plan <> 'free'
+      AND monthly_usage_resets_at IS NOT NULL AND monthly_usage_resets_at <= NOW()
+  `, [id]);
   const r = await getDatabasePool().query('SELECT * FROM app_users WHERE id=$1', [id]);
   return r.rows[0] ? userFromRow(r.rows[0]) : null;
 }
@@ -149,7 +221,8 @@ export async function createUser(email: string, password: string): Promise<Serve
 export async function authenticateUser(email: string, password: string): Promise<ServerUser | null> {
   const user = await getUserByEmail(email);
   if (!user?.passwordHash || !user.salt || !verifyPassword(password, user.salt, user.passwordHash)) return null;
-  return updateUser(user.id, { lastLoginAt: new Date().toISOString() });
+  const updated = await updateUser(user.id, { lastLoginAt: new Date().toISOString() });
+  return updated ? getUserById(updated.id) : null;
 }
 export async function setUserPassword(id: string, password: string): Promise<ServerUser | null> {
   if (password.length < 16 || password.length > 128) return null;
@@ -240,6 +313,155 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   }
   next();
 }
+
+export type SubscriptionPlan = 'starter' | 'pro' | 'business';
+export type SubscriptionBillingCycle = 'monthly' | 'annual';
+export type SubscriptionPaymentMethod = 'baridimob' | 'edahabia';
+
+export interface SubscriptionPaymentRequest {
+  id: string; userId: string; email: string; plan: SubscriptionPlan;
+  billingCycle: SubscriptionBillingCycle; amountDzd: number;
+  paymentMethod: SubscriptionPaymentMethod; transactionReference: string;
+  senderName: string | null; receiptNote: string | null; status: 'pending' | 'approved' | 'rejected';
+  reviewedAt: string | null; rejectionReason: string | null; receiptAvailable: boolean; createdAt: string;
+}
+
+const subscriptionFromRow = (r: any): SubscriptionPaymentRequest => ({
+  id: r.id, userId: r.user_id, email: r.email, plan: r.plan,
+  billingCycle: r.billing_cycle, amountDzd: Number(r.amount_dzd),
+  paymentMethod: r.payment_method, transactionReference: r.transaction_reference,
+  senderName: r.sender_name || null, receiptNote: r.receipt_note || null,
+  status: r.status, reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).toISOString() : null,
+  rejectionReason: r.rejection_reason || null, receiptAvailable: Boolean(r.receipt_available ?? r.receipt_data), createdAt: new Date(r.created_at).toISOString(),
+});
+
+export async function createSubscriptionPaymentRequest(input: {
+  userId: string; plan: SubscriptionPlan; billingCycle: SubscriptionBillingCycle;
+  paymentMethod: SubscriptionPaymentMethod; transactionReference: string;
+  senderName?: string; receiptNote?: string; receiptData?: Buffer; receiptMimeType?: string; receiptFilename?: string;
+}): Promise<SubscriptionPaymentRequest> {
+  const prices: Record<SubscriptionPlan, Record<SubscriptionBillingCycle, number>> = {
+    starter: { monthly: 2900, annual: 29000 },
+    pro: { monthly: 5900, annual: 59000 },
+    business: { monthly: 14500, annual: 145000 },
+  };
+  const amount = prices[input.plan][input.billingCycle];
+  const id = 'pay-' + crypto.randomBytes(16).toString('hex');
+  const reference = input.transactionReference.trim();
+  if (reference.length < 5 || reference.length > 100) throw new Error('INVALID_TRANSACTION_REFERENCE');
+  const client = await getDatabasePool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM app_users WHERE id=$1 FOR UPDATE', [input.userId]);
+    const pending = await client.query(
+      "SELECT id FROM subscription_payment_requests WHERE user_id=$1 AND status='pending' FOR UPDATE",
+      [input.userId],
+    );
+    if (pending.rowCount) throw new Error('PENDING_PAYMENT_EXISTS');
+    await client.query(`
+      INSERT INTO subscription_payment_requests
+        (id,user_id,plan,billing_cycle,amount_dzd,payment_method,transaction_reference,sender_name,receipt_note,receipt_data,receipt_mime_type,receipt_filename)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      RETURNING *
+    `, [id,input.userId,input.plan,input.billingCycle,amount,input.paymentMethod,reference,
+      input.senderName?.trim().slice(0,120) || null,input.receiptNote?.trim().slice(0,1000) || null,
+      input.receiptData || null,input.receiptMimeType || null,input.receiptFilename?.trim().slice(0,180) || null]);
+    const withEmail = await client.query(`
+      SELECT p.*, u.email FROM subscription_payment_requests p
+      JOIN app_users u ON u.id=p.user_id WHERE p.id=$1
+    `, [id]);
+    await client.query('COMMIT');
+    return subscriptionFromRow(withEmail.rows[0]);
+  } catch (error: any) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    if (error?.code === '23505') throw new Error('DUPLICATE_TRANSACTION_REFERENCE');
+    throw error;
+  } finally { client.release(); }
+}
+
+export async function listSubscriptionPaymentRequests(status?: 'pending'|'approved'|'rejected'): Promise<SubscriptionPaymentRequest[]> {
+  const result = await getDatabasePool().query(`
+    SELECT p.id,p.user_id,p.plan,p.billing_cycle,p.amount_dzd,p.payment_method,p.transaction_reference,p.sender_name,p.receipt_note,p.status,p.reviewed_at,p.rejection_reason,p.created_at,u.email,(p.receipt_data IS NOT NULL) AS receipt_available FROM subscription_payment_requests p
+    JOIN app_users u ON u.id=p.user_id
+    WHERE ($1::text IS NULL OR p.status=$1)
+    ORDER BY CASE WHEN p.status='pending' THEN 0 ELSE 1 END, p.created_at DESC
+    LIMIT 500
+  `, [status || null]);
+  return result.rows.map(subscriptionFromRow);
+}
+
+export async function getUserSubscriptionPaymentRequests(userId: string): Promise<SubscriptionPaymentRequest[]> {
+  const result = await getDatabasePool().query(`
+    SELECT p.id,p.user_id,p.plan,p.billing_cycle,p.amount_dzd,p.payment_method,p.transaction_reference,p.sender_name,p.receipt_note,p.status,p.reviewed_at,p.rejection_reason,p.created_at,u.email,(p.receipt_data IS NOT NULL) AS receipt_available FROM subscription_payment_requests p
+    JOIN app_users u ON u.id=p.user_id WHERE p.user_id=$1
+    ORDER BY p.created_at DESC LIMIT 50
+  `, [userId]);
+  return result.rows.map(subscriptionFromRow);
+}
+
+
+export async function getSubscriptionPaymentReceipt(requestId: string): Promise<{ data: Buffer; mimeType: string; filename: string } | null> {
+  const result = await getDatabasePool().query(
+    'SELECT receipt_data, receipt_mime_type, receipt_filename FROM subscription_payment_requests WHERE id=$1',
+    [requestId],
+  );
+  const row = result.rows[0];
+  if (!row?.receipt_data || !row.receipt_mime_type) return null;
+  return {
+    data: Buffer.isBuffer(row.receipt_data) ? row.receipt_data : Buffer.from(row.receipt_data),
+    mimeType: row.receipt_mime_type,
+    filename: row.receipt_filename || 'payment-receipt',
+  };
+}
+
+export async function reviewSubscriptionPaymentRequest(input: {
+  requestId: string; adminUserId: string; decision: 'approved'|'rejected'; rejectionReason?: string;
+}): Promise<SubscriptionPaymentRequest> {
+  const client = await getDatabasePool().connect();
+  try {
+    await client.query('BEGIN');
+    const owner = await client.query(
+      'SELECT user_id FROM subscription_payment_requests WHERE id=$1',
+      [input.requestId],
+    );
+    if (!owner.rows[0]) throw new Error('PAYMENT_REQUEST_NOT_FOUND');
+    await client.query('SELECT id FROM app_users WHERE id=$1 FOR UPDATE', [owner.rows[0].user_id]);
+    const found = await client.query(`
+      SELECT p.*, u.email FROM subscription_payment_requests p
+      JOIN app_users u ON u.id=p.user_id WHERE p.id=$1 FOR UPDATE OF p
+    `, [input.requestId]);
+    if (!found.rows[0]) throw new Error('PAYMENT_REQUEST_NOT_FOUND');
+    const payment = subscriptionFromRow(found.rows[0]);
+    if (payment.status !== 'pending') throw new Error('PAYMENT_REQUEST_ALREADY_REVIEWED');
+    if (input.decision === 'approved') {
+      const months = payment.billingCycle === 'annual' ? 12 : 1;
+      const limits: Record<SubscriptionPlan, number> = { starter: 50, pro: 9999, business: 9999 };
+      const userUpdate = await client.query(`
+        UPDATE app_users SET plan=$2, monthly_generations_used=0,
+          monthly_generations_limit=$3, monthly_usage_resets_at=NOW() + INTERVAL '1 month',
+          subscription_expires_at=GREATEST(COALESCE(subscription_expires_at,NOW()),NOW()) + ($4::integer * INTERVAL '1 month')
+        WHERE id=$1 AND role='user'
+      `, [payment.userId,payment.plan,limits[payment.plan],months]);
+      if (userUpdate.rowCount !== 1) throw new Error('SUBSCRIPTION_USER_NOT_ELIGIBLE');
+    }
+    const updated = await client.query(`
+      UPDATE subscription_payment_requests
+      SET status=$2, reviewed_by=$3, reviewed_at=NOW(), rejection_reason=$4
+      WHERE id=$1 RETURNING id
+    `, [input.requestId,input.decision,input.adminUserId,
+      input.decision === 'rejected' ? input.rejectionReason?.trim().slice(0,500) || 'لم يتم إثبات الدفع.' : null]);
+    const withEmail = await client.query(`
+      SELECT p.*, u.email FROM subscription_payment_requests p
+      JOIN app_users u ON u.id=p.user_id WHERE p.id=$1
+    `, [input.requestId]);
+    await client.query('COMMIT');
+    return subscriptionFromRow(withEmail.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
+}
+
 export function checkGenerationAllowance(user?: ServerUser): { allowed: boolean; reason?: string; remaining?: number; plan: string } {
   if (!user) return { allowed: true, remaining: 1, plan: 'free' };
   if (user.role === 'admin') return { allowed: true, remaining: 999999, plan: 'admin_unlimited' };

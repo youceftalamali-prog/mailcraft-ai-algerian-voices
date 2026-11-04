@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, "feat/cloudflare-workers-deployment", "grok/full-project-repair"]
+    branches: [main, "feat/cloudflare-workers-deployment", "grok/full-project-repair", "fix/auth-store-initialization"]
   push:
-    branches: [main, "fix/security-hardening-*", "feat/cloudflare-workers-deployment", "grok/full-project-repair", "fix/auth-*"]
+    branches: [main, "fix/security-hardening-*", "feat/cloudflare-workers-deployment", "grok/full-project-repair", "fix/auth-*", "fix/public-showcase-*"]
 
 jobs:
   verify:

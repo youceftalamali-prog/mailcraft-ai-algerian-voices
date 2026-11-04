@@ -11,11 +11,10 @@ import { EmailCampaign } from './types/index';
 import { generateDefaultCampaign } from './utils/campaign';
 import {
   ShowcaseAudioSample,
-  loadAdminShowcaseSamples,
   ADMIN_EMAIL,
   isAdminUser,
-  SAMPLES_UPDATED_EVENT,
 } from './services/adminStore';
+import { loadShowcaseSamplesFromServer } from './services/showcaseSamplesApi';
 import { Sparkles, AlertCircle, Wand2, Mic, MessageSquare, ShieldCheck, Lock, ShieldAlert, KeyRound, Crown, ArrowRight, CheckCircle2 } from 'lucide-react';
 
 type SessionUser = { email: string; role: 'admin' | 'user' };
@@ -36,9 +35,45 @@ export default function App() {
   const [adminLoginFormEmail, setAdminLoginFormEmail] = useState(ADMIN_EMAIL);
   const [adminLoginFormPassword, setAdminLoginFormPassword] = useState('');
   const [adminLoginError, setAdminLoginError] = useState<string | null>(null);
-  const [showcaseSamples, setShowcaseSamples] = useState<ShowcaseAudioSample[]>(() =>
-    loadAdminShowcaseSamples()
-  );
+  const [showcaseSamples, setShowcaseSamples] = useState<ShowcaseAudioSample[]>([]);
+  const [showcaseSamplesReady, setShowcaseSamplesReady] = useState(false);
+  const [showcaseSamplesLoadError, setShowcaseSamplesLoadError] = useState<string | null>(null);
+
+  // Showcase samples are shared server data, not per-browser localStorage.
+  React.useEffect(() => {
+    let active = true;
+    loadShowcaseSamplesFromServer()
+      .then((samples) => {
+        if (active) {
+          setShowcaseSamples(samples);
+          setShowcaseSamplesLoadError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn('Could not load shared showcase samples:', error);
+        if (active) setShowcaseSamplesLoadError('تعذر تحميل العينات المحفوظة. لم نعرض بيانات افتراضية حتى لا يتم استبدال بياناتك الحقيقية بالخطأ.');
+      })
+      .finally(() => {
+        if (active) setShowcaseSamplesReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleRetryShowcaseSamples = async () => {
+    setShowcaseSamplesReady(false);
+    setShowcaseSamplesLoadError(null);
+    try {
+      const samples = await loadShowcaseSamplesFromServer();
+      setShowcaseSamples(samples);
+    } catch (error) {
+      console.warn('Could not reload shared showcase samples:', error);
+      setShowcaseSamplesLoadError('تعذر تحميل العينات المحفوظة. حاول مرة أخرى بعد التأكد من اتصال قاعدة البيانات.');
+    } finally {
+      setShowcaseSamplesReady(true);
+    }
+  };
 
   // Restore the server-side session and take authenticated users back to
   // their workspace after a full page reload.
@@ -76,17 +111,6 @@ export default function App() {
       });
   }, []);
 
-  // Synchronize samples state across views in real-time
-  React.useEffect(() => {
-    const handleSync = (e: Event) => {
-      const customEvent = e as CustomEvent<ShowcaseAudioSample[]>;
-      if (customEvent.detail && Array.isArray(customEvent.detail)) {
-        setShowcaseSamples(customEvent.detail);
-      }
-    };
-    window.addEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-    return () => window.removeEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-  }, []);
   const [campaign, setCampaign] = useState<EmailCampaign>(() =>
     generateDefaultCampaign('SaaS Product Launch with 30% Lifetime Discount')
   );
@@ -446,7 +470,18 @@ export default function App() {
 
         {/* Tab 5: Admin Master Dashboard & Settings Protected by Strict Admin Guard */}
         {activeTab === 'admin' && (
-          isAdmin ? (
+          !showcaseSamplesReady ? (
+            <div className="max-w-2xl mx-auto py-16 text-center text-sm text-slate-300" dir="rtl">
+              جاري تحميل العينات الصوتية المحفوظة...
+            </div>
+          ) : showcaseSamplesLoadError ? (
+            <div className="max-w-2xl mx-auto py-16 px-4 text-center text-sm text-amber-200" dir="rtl">
+              <p>{showcaseSamplesLoadError}</p>
+              <button type="button" onClick={handleRetryShowcaseSamples} className="mt-4 rounded-xl bg-indigo-600 px-5 py-2 font-bold text-white hover:bg-indigo-500">
+                إعادة تحميل العينات
+              </button>
+            </div>
+          ) : isAdmin ? (
             <AdminMasterDashboard
               onNavigateToLanding={() => setActiveTab('landing')}
               onNavigateToStudio={() => setActiveTab('persona_studio')}

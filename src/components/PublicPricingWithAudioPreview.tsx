@@ -3,7 +3,6 @@ import {
   Mic,
   Play,
   Pause,
-  Download,
   Sparkles,
   Volume2,
   ShieldCheck,
@@ -33,11 +32,11 @@ import {
   ALGIERS_PERSONA_REGISTRY,
 } from '../services/algerianPersonaVoiceService';
 import { speakAdScript, stopAdSpeech } from '../utils/speechSynthesisService';
+import { SubscriptionPaymentRequestForm } from './SubscriptionPaymentRequestForm';
 import {
   ShowcaseAudioSample,
-  loadAdminShowcaseSamples,
+  INITIAL_SHOWCASE_SAMPLES,
   isAdminUser,
-  SAMPLES_UPDATED_EVENT,
 } from '../services/adminStore';
 
 type AuthResponse = {
@@ -53,6 +52,18 @@ interface PublicPricingWithAudioPreviewProps {
   onNavigateToAdmin?: () => void;
   currentUserEmail?: string | null;
 }
+
+const GOOGLE_CLIENT_ID = '144615124580-lv0vnbh21na92ooh261sgloj6dsdlvo8.apps.googleusercontent.com';
+
+type GoogleIdentityCredential = { credential?: string };
+type GoogleIdentityApi = {
+  accounts: {
+    id: {
+      initialize(options: { client_id: string; callback: (response: GoogleIdentityCredential) => void }): void;
+      renderButton(element: HTMLElement, options: Record<string, string>): void;
+    };
+  };
+};
 
 const SHOWCASE_SAMPLES: ShowcaseAudioSample[] = [
   {
@@ -159,35 +170,25 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
 
   // Billing cycle toggle: monthly vs annual
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [selectedPaymentPlan, setSelectedPaymentPlan] = useState<'starter'|'pro'|'business'>('starter');
 
-  // Resolved dynamic active samples with instant live synchronization
+  // Samples are loaded from the shared server state by App, never from visitor localStorage.
   const [liveSamples, setLiveSamples] = useState<ShowcaseAudioSample[]>(() =>
-    showcaseSamples || loadAdminShowcaseSamples()
+    showcaseSamples || INITIAL_SHOWCASE_SAMPLES
   );
 
   useEffect(() => {
-    if (showcaseSamples) {
-      setLiveSamples(showcaseSamples);
-    }
+    if (showcaseSamples) setLiveSamples(showcaseSamples);
   }, [showcaseSamples]);
-
-  useEffect(() => {
-    const handleSync = (e: Event) => {
-      const customEvent = e as CustomEvent<ShowcaseAudioSample[]>;
-      if (customEvent.detail && Array.isArray(customEvent.detail)) {
-        setLiveSamples(customEvent.detail);
-      }
-    };
-    window.addEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-    return () => window.removeEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-  }, []);
 
   const activeSamples = liveSamples;
 
-  // Showcase Samples playback state
+  // Keep one HTMLAudioElement per immutable recording URL. Repeat plays reuse
+  // the same element and the browser's HTTP cache instead of fetching the file again.
   const [activePlayingSampleId, setActivePlayingSampleId] = useState<string | null>(null);
   const [sampleAudioProgress, setSampleAudioProgress] = useState<number>(0);
   const sampleAudioRef = useRef<HTMLAudioElement | null>(null);
+  const sampleAudioCacheRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   // Auth Modal & Form State
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('signup');
@@ -198,17 +199,86 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
   const [authRememberMe, setAuthRememberMe] = useState(true);
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false);
   const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
-  const [copiedRip, setCopiedRip] = useState(false);
+  const [isGoogleAuthLoading, setIsGoogleAuthLoading] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
 
   // FAQ Accordion State
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
+  // Google Identity Services returns an ID token; the API verifies it server-side.
+  useEffect(() => {
+    const container = googleButtonRef.current;
+    if (!container) return;
+
+    const renderGoogleButton = () => {
+      const google = (window as Window & { google?: GoogleIdentityApi }).google;
+      if (!google?.accounts?.id || !googleButtonRef.current) return;
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: async ({ credential }) => {
+          if (!credential) {
+            setAuthSuccessMessage('لم يصل رمز التحقق من Google. أعد المحاولة.');
+            return;
+          }
+          setIsGoogleAuthLoading(true);
+          setAuthSuccessMessage(null);
+          try {
+            const response = await fetch('/api/auth/google', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ credential }),
+            });
+            const data = await response.json().catch(() => ({})) as AuthResponse;
+            if (!response.ok || !data.success || !data.user?.email) {
+              setAuthSuccessMessage(data.message || 'تعذر تسجيل الدخول عبر Google.');
+              return;
+            }
+            setAuthSuccessMessage('تم تسجيل الدخول عبر Google بنجاح.');
+            onLoginSuccess?.(data.user.email);
+            window.setTimeout(() => onEnterStudio(), 700);
+          } catch {
+            setAuthSuccessMessage('تعذر الاتصال بالخادم. لم يتم تسجيل الدخول.');
+          } finally {
+            setIsGoogleAuthLoading(false);
+          }
+        },
+      });
+      google.accounts.id.renderButton(googleButtonRef.current, {
+        type: 'standard',
+        theme: 'filled_black',
+        size: 'large',
+        text: authMode === 'signup' ? 'signup_with' : 'signin_with',
+        shape: 'pill',
+        width: '320',
+        locale: 'ar',
+      });
+    };
+
+    const existingScript = document.getElementById('google-identity-services');
+    if ((window as Window & { google?: GoogleIdentityApi }).google?.accounts?.id) {
+      renderGoogleButton();
+      return;
+    }
+    const script = existingScript instanceof HTMLScriptElement
+      ? existingScript
+      : document.createElement('script');
+    if (!existingScript) {
+      script.id = 'google-identity-services';
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', renderGoogleButton);
+    return () => script.removeEventListener('load', renderGoogleButton);
+  }, [authMode, onEnterStudio, onLoginSuccess]);
+
   // Clean up audio on unmount
   useEffect(() => {
     return () => {
-      if (sampleAudioRef.current) {
-        sampleAudioRef.current.pause();
-      }
+      if (sampleAudioRef.current) sampleAudioRef.current.pause();
+      sampleAudioCacheRef.current.forEach((audio) => audio.pause());
+      sampleAudioCacheRef.current.clear();
       stopAdSpeech();
     };
   }, []);
@@ -248,7 +318,14 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
       return;
     }
 
-    const audio = new Audio(sample.customAudioUrl);
+    const audioCache = sampleAudioCacheRef.current;
+    let audio = audioCache.get(sample.customAudioUrl);
+    if (!audio) {
+      audio = new Audio(sample.customAudioUrl);
+      audio.preload = 'none';
+      audioCache.set(sample.customAudioUrl, audio);
+    }
+    audio.currentTime = 0;
     sampleAudioRef.current = audio;
     let speechFallbackStarted = false;
     const fallbackToScriptSpeech = () => {
@@ -320,12 +397,6 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
     }
   };
 
-  const handleCopyRip = () => {
-    navigator.clipboard.writeText('00799999002345678921');
-    setCopiedRip(true);
-    setTimeout(() => setCopiedRip(false), 2500);
-  };
-
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
@@ -379,7 +450,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               onClick={() => scrollToSection('payment-methods')}
               className="hover:text-emerald-400 transition-colors cursor-pointer"
             >
-              بريدي موب والذهبية
+              طرق الدفع
             </button>
             <button
               onClick={() => scrollToSection('auth-section')}
@@ -476,7 +547,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             </span>
             <span className="flex items-center gap-2 bg-slate-900/90 px-4 py-2 rounded-xl border border-slate-800 shadow-md">
               <CreditCard className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>دفع محلي عبر بريدي موب والذهبية</span>
+              <span>تحويل BaridiMob مع مراجعة يدوية</span>
             </span>
           </div>
 
@@ -699,7 +770,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             </h2>
             <p className="text-sm sm:text-base text-slate-300 mt-2.5 max-w-2xl mx-auto">
               بدون الحاجة لبطاقات فيزا أو ماستركارد دولية! ادفع مباشرة عبر بريدي موب (BaridiMob) أو البطاقة
-              الذهبية (Edahabia) بأسعار واضحة بالدينار الجزائري.
+              تحويل BaridiMob متاح حالياً، أما الدفع المباشر بالبطاقة الذهبية فغير مفعّل بعد.
             </p>
 
             {/* Monthly / Annual Toggle Switch */}
@@ -835,10 +906,10 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               <div className="mt-8">
                 <button
                   type="button"
-                  onClick={() => scrollToSection('payment-methods')}
+                  onClick={() => { setSelectedPaymentPlan('starter'); scrollToSection('payment-methods'); }}
                   className="w-full inline-flex items-center justify-center py-3 px-4 rounded-xl text-xs font-bold text-indigo-300 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 transition-all cursor-pointer"
                 >
-                  الدفع بـ بريدي موب (2,900 دج)
+                  إرسال طلب الدفع ({billingCycle === 'monthly' ? '2,900' : '29,000'} دج)
                 </button>
               </div>
             </div>
@@ -896,10 +967,10 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               <div className="mt-8">
                 <button
                   type="button"
-                  onClick={() => scrollToSection('payment-methods')}
+                  onClick={() => { setSelectedPaymentPlan('pro'); scrollToSection('payment-methods'); }}
                   className="w-full inline-flex items-center justify-center py-3.5 px-4 rounded-xl text-sm font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-lg shadow-emerald-500/30 transition-all cursor-pointer"
                 >
-                  اشترك الآن في Pro (5,900 دج)
+                  إرسال طلب Pro ({billingCycle === 'monthly' ? '5,900' : '59,000'} دج)
                 </button>
               </div>
             </div>
@@ -948,10 +1019,10 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               <div className="mt-8">
                 <button
                   type="button"
-                  onClick={() => scrollToSection('payment-methods')}
+                  onClick={() => { setSelectedPaymentPlan('business'); scrollToSection('payment-methods'); }}
                   className="w-full inline-flex items-center justify-center py-3 px-4 rounded-xl text-xs font-bold text-slate-200 bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
                 >
-                  طلب اشتراك وكالة (14,500 دج)
+                  إرسال طلب Agency ({billingCycle === 'monthly' ? '14,500' : '145,000'} دج)
                 </button>
               </div>
             </div>
@@ -959,19 +1030,19 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
         </div>
       </section>
 
-      {/* SECTION 3: Algerian Local Payment Methods (بريدي موب والبطاقة الذهبية) */}
+      {/* SECTION 3: Local Manual Payment Requests */}
       <section id="payment-methods" className="py-16 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="rounded-3xl bg-slate-900 border border-indigo-500/30 p-6 sm:p-10 shadow-2xl relative overflow-hidden">
           <div className="text-center max-w-3xl mx-auto mb-10">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-bold border border-emerald-500/30 mb-3">
               <CreditCard className="w-3.5 h-3.5" />
-              <span>طرق الدفع الجزائرية المعتمدة (100% محلي)</span>
+              <span>طلبات الدفع المحلية - مراجعة يدوية</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white">
-              الدفع الفوري السهل عبر بريدي موب (BaridiMob) والبطاقة الذهبية 💳🇩🇿
+              الدفع عبر التحويل البريدي 💳🇩🇿
             </h2>
             <p className="text-sm text-slate-300 mt-2">
-              نوفر للتجار في الجزائر إمكانية التفعيل الفوري لاشتراكاتهم عبر الوسائل المحلية الموثوقة بدون تعقيدات البنوك الأجنبية.
+              أرسل طلب اشتراك بعد إتمام التحويل. لا يتم تفعيل الباقة إلا بعد التحقق من وصول المبلغ فعلياً.
             </p>
           </div>
 
@@ -985,42 +1056,21 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   </div>
                   <div>
                     <h3 className="text-base font-extrabold text-white">تطبيق بريدي موب (BaridiMob)</h3>
-                    <p className="text-xs text-slate-400">تحويل فوري برقم الـ RIP</p>
+                    <p className="text-xs text-slate-400">رقم الحساب البريدي للتحويل عبر BaridiMob</p>
                   </div>
                 </div>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  تفعيل سريع
+                  مراجعة بعد التحقق
                 </span>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] text-slate-400">رقم الحساب البريدي الجاري RIP:</div>
-                  <div className="text-sm font-mono font-bold text-emerald-400 mt-0.5" dir="ltr">
-                    00799999002345678921
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCopyRip}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  {copiedRip ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>تم النسخ</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>نسخ RIP</span>
-                    </>
-                  )}
-                </button>
+              <div className="rounded-xl bg-slate-900 border border-slate-700 p-4 space-y-2">
+                <p className="text-xs text-slate-400">رقم CCP للتحويل</p>
+                <p dir="ltr" className="text-xl sm:text-2xl font-black tracking-wider text-white text-center select-all">00799999000001732820</p>
+                <p className="text-[11px] text-slate-400 text-center">انسخ رقم الحساب وأكمل التحويل من تطبيق BaridiMob. لا حاجة لإدخال اسم صاحب الحساب في هذه الصفحة.</p>
               </div>
-
               <p className="text-xs text-slate-400 leading-relaxed">
-                بعد التحويل عبر تطبيق BaridiMob، أرسل صورة الإشعار (Reçu) مع إيميل حسابك عبر WhatsApp أو إلى الدعم ليتم تفعيل باقتك مباشرة خلال أقل من 15 دقيقة.
+                بعد إتمام التحويل، أدخل رقم مرجع العملية في نموذج طلب الاشتراك أدناه. ستتم مراجعة وصول المبلغ يدوياً.
               </p>
             </div>
 
@@ -1033,26 +1083,27 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
                   </div>
                   <div>
                     <h3 className="text-base font-extrabold text-white">البطاقة الذهبية (Edahabia)</h3>
-                    <p className="text-xs text-slate-400">دفع آمن عبر موزع بريد الجزائر SATIM</p>
+                    <p className="text-xs text-slate-400">تحويل بريدي - مراجعة يدوية</p>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  تأكيد آلي
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  غير مربوط ببوابة إلكترونية
                 </span>
               </div>
 
               <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
-                <ShieldCheck className="w-6 h-6 text-emerald-400 shrink-0" />
+                <AlertCircle className="w-6 h-6 text-amber-400 shrink-0" />
                 <div className="text-xs text-slate-300">
-                  معاملات مشفرة 100% مع نظام الحماية الثلاثي OTP عبر الرسائل النصية القصيرة (SMS).
+                  لا تدخل بيانات البطاقة أو رمز OTP داخل هذا الموقع. لا توجد حالياً بوابة SATIM مفعّلة.
                 </div>
               </div>
 
               <p className="text-xs text-slate-400 leading-relaxed">
-                ادخل رقم بطاقتك وتاريخ الصلاحية ورمز التحقق عبر بوابة الدفع الوطنية، ويتم تجديد اشتراكك الصوتي فوراً وبشكل تلقائي.
+                لا يمكن الدفع بالبطاقة مباشرة حالياً. استخدم التحويل البريدي بعد استلام بيانات الحساب الرسمية، ثم أرسل مرجع العملية للمراجعة.
               </p>
             </div>
           </div>
+          <SubscriptionPaymentRequestForm currentUserEmail={currentUserEmail} billingCycle={billingCycle} initialPlan={selectedPaymentPlan} />
         </div>
       </section>
 
@@ -1114,8 +1165,16 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               </div>
             )}
 
-            <div className="mb-5 p-3 rounded-xl bg-amber-950/30 border border-amber-500/30 text-amber-200 text-xs leading-6">
-              تسجيل الدخول عبر Google والدخول السريع للمالك متوقفان مؤقتاً إلى حين إعداد OAuth والتحقق الآمن. استعمل البريد الإلكتروني وكلمة المرور.
+            <div className="mb-5 flex flex-col items-center gap-3">
+              <div ref={googleButtonRef} className="min-h-10 flex justify-center" />
+              {isGoogleAuthLoading && (
+                <p className="text-xs text-indigo-300" role="status">جارٍ التحقق من حساب Google...</p>
+              )}
+              <div className="flex items-center gap-3 w-full text-[11px] text-slate-500">
+                <span className="h-px flex-1 bg-slate-700" />
+                <span>أو عبر البريد الإلكتروني</span>
+                <span className="h-px flex-1 bg-slate-700" />
+              </div>
             </div>
 
             {/* Method 2: Traditional Email & Password Form */}
@@ -1258,7 +1317,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             },
             {
               q: 'ماذا يحدث بعد استهلاك تجربة الإعلان المجانية الأولى؟',
-              a: 'بعد استهلاك تجربتك المجانية الأولى بنجاح، يمكنك الترقية إلى باقة Starter (2,900 دج) أو باقة Pro E-Commerce (5,900 دج) عبر الدفع المحلي بـ بريدي موب أو البطاقة الذهبية لمواصلة إنتاج الإعلانات بدون قيود.',
+              a: 'بعد استهلاك تجربتك المجانية الأولى بنجاح، يمكنك الترقية إلى باقة Starter (2,900 دج) أو باقة Pro E-Commerce (5,900 دج) عبر تحويل BaridiMob بعد تأكيد بيانات الحساب الرسمية والتحقق اليدوي من وصول المبلغ.',
             },
             {
               q: 'لماذا يعتبر الصوت العاصمي الصافي الأفضل لإعلانات التجارة الإلكترونية في الجزائر؟',
@@ -1270,7 +1329,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
             },
             {
               q: 'كيف يتم الدفع عبر بريدي موب (BaridiMob)؟',
-              a: 'يمكنك إرسال مبلغ الاشتراك مباشرة إلى رقم الحساب البريدي الجاري (RIP: 00799999002345678921) عبر تطبيق بريدي موب، ثم إرسال صورة وصل التحويل للدعم ليتم تفعيل حسابك مباشرة خلال 15 دقيقة.',
+              a: 'بعد تأكيد بيانات الحساب الرسمية، يمكنك إجراء التحويل وإرسال رقم مرجع العملية من نموذج طلب الاشتراك. تبقى الباقة غير مفعّلة حتى يتحقق المدير من وصول المبلغ فعلياً.',
             },
             {
               q: 'هل يُسمح باستخدام الملفات الصوتية في إعلانات ممولة على فيسبوك وتيك توك؟',
@@ -1336,7 +1395,7 @@ export const PublicPricingWithAudioPreview: React.FC<PublicPricingWithAudioPrevi
               onClick={() => scrollToSection('payment-methods')}
               className="hover:text-white transition-colors cursor-pointer"
             >
-              بريدي موب والذهبية
+              طرق الدفع
             </button>
             <button onClick={onEnterStudio} className="text-emerald-400 hover:underline cursor-pointer">
               الاستوديو المباشر

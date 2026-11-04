@@ -50,22 +50,17 @@ import {
   X
 } from 'lucide-react';
 import {
-  AdminSubscription,
   ShowcaseAudioSample,
   AdminAISettings,
-  loadAdminSubscriptions,
-  saveAdminSubscriptions,
-  loadAdminShowcaseSamples,
-  saveAdminShowcaseSamples,
   loadAdminAISettings,
   saveAdminAISettings,
-  INITIAL_SUBSCRIPTIONS,
   INITIAL_SHOWCASE_SAMPLES,
   INITIAL_AI_SETTINGS,
   ADMIN_EMAIL,
   isAdminUser,
-  SAMPLES_UPDATED_EVENT,
 } from '../services/adminStore';
+import { saveShowcaseSamplesToServer } from '../services/showcaseSamplesApi';
+import { SubscriptionPaymentsPanel } from './SubscriptionPaymentsPanel';
 import {
   AlgiersPersonaId,
   ALGIERS_PERSONA_REGISTRY,
@@ -90,29 +85,9 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   // Active Tab inside Admin Dashboard
   const [adminTab, setAdminTab] = useState<'subscriptions' | 'samples' | 'ai_settings' | 'overview'>('subscriptions');
 
-  // Subscriptions State
-  const [subscriptions, setSubscriptions] = useState<AdminSubscription[]>(() => loadAdminSubscriptions());
-  const [subSearchQuery, setSubSearchQuery] = useState('');
-  const [subStatusFilter, setSubStatusFilter] = useState<'all' | 'pending' | 'active' | 'rejected'>('all');
-  const [subMethodFilter, setSubMethodFilter] = useState<'all' | 'baridimob' | 'edahabia'>('all');
-  const [selectedReceiptSub, setSelectedReceiptSub] = useState<AdminSubscription | null>(null);
-  const [showAddSubModal, setShowAddSubModal] = useState(false);
-  const [copiedTxnId, setCopiedTxnId] = useState<string | null>(null);
-
-  // New Subscription Form State
-  const [newStoreName, setNewStoreName] = useState('');
-  const [newOwnerName, setNewOwnerName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newPhone, setNewPhone] = useState('');
-  const [newWilaya, setNewWilaya] = useState('16 - الجزائر العاصمة');
-  const [newPlan, setNewPlan] = useState<'starter' | 'pro' | 'business'>('pro');
-  const [newMethod, setNewMethod] = useState<'baridimob' | 'edahabia'>('baridimob');
-  const [newTxnId, setNewTxnId] = useState('');
-  const [newNote, setNewNote] = useState('');
-
   // Voice Samples State (with live synchronization)
   const [samples, setSamples] = useState<ShowcaseAudioSample[]>(() =>
-    showcaseSamples || loadAdminShowcaseSamples()
+    showcaseSamples || INITIAL_SHOWCASE_SAMPLES
   );
   const [activePlayingSampleId, setActivePlayingSampleId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -147,6 +122,10 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   } | null>(null);
   const [saveSettingsSuccess, setSaveSettingsSuccess] = useState(false);
 
+  const [subscriptionStats, setSubscriptionStats] = useState({
+    totalUsers: 0, pendingRequests: 0, activeSubscribers: 0, verifiedRevenueDzd: 0,
+  });
+
   // System Stats State
   const [systemStats, setSystemStats] = useState<{
     uptimeSeconds?: number;
@@ -154,6 +133,14 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     serverTime?: string;
     nodeVersion?: string;
   } | null>(null);
+
+  // Load real subscription metrics from the protected server API.
+  useEffect(() => {
+    fetch('/api/admin/subscription-summary', { credentials: 'same-origin', cache: 'no-store' })
+      .then((res) => res.ok ? res.json() as Promise<typeof subscriptionStats> : null)
+      .then((data) => { if (data) setSubscriptionStats(data); })
+      .catch((error) => console.warn('Could not load subscription summary:', error));
+  }, []);
 
   // Fetch live system stats on mount
   useEffect(() => {
@@ -172,30 +159,20 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     }
   }, [showcaseSamples]);
 
-  useEffect(() => {
-    const handleSync = (e: Event) => {
-      const customEvent = e as CustomEvent<ShowcaseAudioSample[]>;
-      if (customEvent.detail && Array.isArray(customEvent.detail)) {
-        setSamples(customEvent.detail);
-      }
-    };
-    window.addEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-    return () => window.removeEventListener(SAMPLES_UPDATED_EVENT, handleSync);
-  }, []);
-
-  // Sync showcase samples changes to parent & storage
-  const updateSamplesState = (newSamples: ShowcaseAudioSample[]) => {
-    setSamples(newSamples);
-    saveAdminShowcaseSamples(newSamples);
-    if (onUpdateShowcaseSamples) {
-      onUpdateShowcaseSamples(newSamples);
+  // Save sample metadata and binary audio files to the shared server store.
+  // Browser localStorage is deliberately not used for public showcase content.
+  const updateSamplesState = async (newSamples: ShowcaseAudioSample[]): Promise<boolean> => {
+    try {
+      const savedSamples = await saveShowcaseSamplesToServer(newSamples);
+      setSamples(savedSamples);
+      onUpdateShowcaseSamples?.(savedSamples);
+      return true;
+    } catch (error) {
+      console.error('Failed to save showcase samples:', error);
+      setSampleActionToast(error instanceof Error ? error.message : 'تعذر حفظ العينات الصوتية على الخادم.');
+      setTimeout(() => setSampleActionToast(null), 5000);
+      return false;
     }
-  };
-
-  // Sync subscriptions changes to storage
-  const updateSubscriptionsState = (newSubs: AdminSubscription[]) => {
-    setSubscriptions(newSubs);
-    saveAdminSubscriptions(newSubs);
   };
 
   // Stop audio on unmount
@@ -207,95 +184,6 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       stopAdSpeech();
     };
   }, []);
-
-  // Action: Activate Subscription
-  const handleActivateSubscription = (subId: string) => {
-    const updated = subscriptions.map((s) => {
-      if (s.id === subId) {
-        return {
-          ...s,
-          status: 'active' as const,
-          activatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-        };
-      }
-      return s;
-    });
-    updateSubscriptionsState(updated);
-  };
-
-  // Action: Reject Subscription
-  const handleRejectSubscription = (subId: string) => {
-    const updated = subscriptions.map((s) => {
-      if (s.id === subId) {
-        return {
-          ...s,
-          status: 'rejected' as const,
-        };
-      }
-      return s;
-    });
-    updateSubscriptionsState(updated);
-  };
-
-  // Action: Reset Subscription to Pending
-  const handleResetSubscription = (subId: string) => {
-    const updated = subscriptions.map((s) => {
-      if (s.id === subId) {
-        return {
-          ...s,
-          status: 'pending' as const,
-        };
-      }
-      return s;
-    });
-    updateSubscriptionsState(updated);
-  };
-
-  // Action: Add New Manual Subscription
-  const handleAddNewSubscription = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newStoreName.trim()) return;
-
-    const planPrices = {
-      starter: 2900,
-      pro: 5900,
-      business: 14500,
-    };
-    const planLabels = {
-      starter: 'باقة الانطلاق (Starter)',
-      pro: 'Pro E-Commerce',
-      business: 'باقة الوكالات والشركات (Agency)',
-    };
-
-    const newSub: AdminSubscription = {
-      id: `sub-${Date.now().toString().slice(-4)}`,
-      storeName: newStoreName.trim(),
-      ownerName: newOwnerName.trim() || 'صاحب المتجر',
-      email: newEmail.trim() || 'client@store.dz',
-      phone: newPhone.trim() || '0550 00 00 00',
-      wilaya: newWilaya,
-      plan: newPlan,
-      planLabel: planLabels[newPlan],
-      amountDzd: planPrices[newPlan],
-      paymentMethod: newMethod,
-      transactionId: newTxnId.trim() || (newMethod === 'baridimob' ? `BM-${Math.floor(10000 + Math.random() * 90000)}` : `SATIM-${Math.floor(100000 + Math.random() * 900000)}`),
-      status: 'pending',
-      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-      receiptNote: newNote.trim() || 'معاملة يدوية مسجلة من لوحة الإدارة',
-      adGenerationsUsed: 0,
-      adGenerationsLimit: newPlan === 'starter' ? 50 : 9999,
-    };
-
-    updateSubscriptionsState([newSub, ...subscriptions]);
-    setShowAddSubModal(false);
-    // Reset form
-    setNewStoreName('');
-    setNewOwnerName('');
-    setNewEmail('');
-    setNewPhone('');
-    setNewTxnId('');
-    setNewNote('');
-  };
 
   // Play a real custom recording when available; otherwise read this sample's script.
   // Factory samples have no recording, so do not play a synthetic placeholder WAV.
@@ -352,6 +240,16 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   const handleAudioFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setSampleActionToast('حجم ملف الصوت يجب ألا يتجاوز 5 ميغابايت.');
+      e.target.value = '';
+      return;
+    }
+    if (!file.type.startsWith('audio/')) {
+      setSampleActionToast('الرجاء اختيار ملف صوتي بصيغة MP3 أو WAV أو OGG أو WEBM.');
+      e.target.value = '';
+      return;
+    }
 
     setUploadedFileName(file.name);
     const reader = new FileReader();
@@ -483,7 +381,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   };
 
   // Action: Add New Showcase Sample
-  const handleAddNewSample = (e: React.FormEvent) => {
+  const handleAddNewSample = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSampleTitle.trim() || !newSampleScript.trim()) return;
 
@@ -504,7 +402,8 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       createdAt: new Date().toISOString().slice(0, 10),
     };
 
-    updateSamplesState([newSample, ...samples]);
+    const saved = await updateSamplesState([newSample, ...samples]);
+    if (!saved) return;
     setShowAddSampleModal(false);
 
     // Reset Form
@@ -517,7 +416,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   };
 
   // Action: Delete Sample (instant deletion with zero blocking dialogs)
-  const handleDeleteSample = (sampleId: string) => {
+  const handleDeleteSample = async (sampleId: string) => {
     if (activePlayingSampleId === sampleId) {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -528,14 +427,15 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
 
     const target = samples.find((s) => s.id === sampleId);
     const filtered = samples.filter((s) => s.id !== sampleId);
-    updateSamplesState(filtered);
+    const saved = await updateSamplesState(filtered);
+    if (!saved) return;
 
     setSampleActionToast(`تم حذف عينة "${target?.title || 'العينة الصوتية'}" فوراً من لوحة الإدارة والواجهة الرئيسية 🗑️`);
     setTimeout(() => setSampleActionToast(null), 4000);
   };
 
   // Action: Save Edited Sample
-  const handleSaveEditedSample = (e: React.FormEvent) => {
+  const handleSaveEditedSample = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSample) return;
 
@@ -550,7 +450,8 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     };
 
     const updated = samples.map((s) => (s.id === editingSample.id ? updatedSample : s));
-    updateSamplesState(updated);
+    const saved = await updateSamplesState(updated);
+    if (!saved) return;
     setEditingSample(null);
     setEditSampleAudioUrl(null);
     setEditSampleFileName(null);
@@ -560,13 +461,14 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
   };
 
   // Action: Reset Samples to Factory Defaults (non-blocking)
-  const handleResetToFactorySamples = () => {
+  const handleResetToFactorySamples = async () => {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
     setActivePlayingSampleId(null);
-    updateSamplesState(INITIAL_SHOWCASE_SAMPLES);
+    const saved = await updateSamplesState(INITIAL_SHOWCASE_SAMPLES);
+    if (!saved) return;
     setSampleActionToast('تمت استعادة كافة النماذج الصوتية الافتراضية بنجاح 🔄');
     setTimeout(() => setSampleActionToast(null), 4000);
   };
@@ -607,35 +509,11 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
     setTimeout(() => setSaveSettingsSuccess(false), 3000);
   };
 
-  // Copy Transaction ID Helper
-  const handleCopyTxn = (txnId: string) => {
-    navigator.clipboard.writeText(txnId);
-    setCopiedTxnId(txnId);
-    setTimeout(() => setCopiedTxnId(null), 2000);
-  };
-
-  // Computed Subscriptions Filter
-  const filteredSubscriptions = subscriptions.filter((sub) => {
-    const matchesSearch =
-      sub.storeName.toLowerCase().includes(subSearchQuery.toLowerCase()) ||
-      sub.ownerName.toLowerCase().includes(subSearchQuery.toLowerCase()) ||
-      sub.transactionId.toLowerCase().includes(subSearchQuery.toLowerCase()) ||
-      sub.phone.includes(subSearchQuery) ||
-      sub.email.toLowerCase().includes(subSearchQuery.toLowerCase());
-
-    const matchesStatus = subStatusFilter === 'all' || sub.status === subStatusFilter;
-    const matchesMethod = subMethodFilter === 'all' || sub.paymentMethod === subMethodFilter;
-
-    return matchesSearch && matchesStatus && matchesMethod;
-  });
-
-  // Calculate Metrics
-  const totalSubscribers = subscriptions.length;
-  const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
-  const activeCount = subscriptions.filter((s) => s.status === 'active').length;
-  const totalRevenueDzd = subscriptions
-    .filter((s) => s.status === 'active')
-    .reduce((sum, s) => sum + s.amountDzd, 0);
+  // Metrics come from verified database records, never browser-local demo data.
+  const totalSubscribers = subscriptionStats.totalUsers;
+  const pendingCount = subscriptionStats.pendingRequests;
+  const activeCount = subscriptionStats.activeSubscribers;
+  const totalRevenueDzd = subscriptionStats.verifiedRevenueDzd;
 
   return (
     <div className="space-y-8 min-h-screen text-slate-100 font-sans pb-16" dir="rtl">
@@ -695,7 +573,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
         <div className="mt-6 pt-5 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
           <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
             <span className="text-slate-400 block text-[11px]">إجمالي المتاجر المشتركة</span>
-            <span className="text-lg font-black text-white font-mono mt-0.5 block">{totalSubscribers} متاجر</span>
+            <span className="text-lg font-black text-white font-mono mt-0.5 block">{totalSubscribers} مستخدمين</span>
           </div>
           <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
             <span className="text-amber-400 block text-[11px] font-bold">بانتظار التأكيد (بريدي موب)</span>
@@ -777,296 +655,8 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       {/* ========================================================================= */}
       {/* SECTION 1: Subscriptions Manager (قسم إدارة الاشتراكات وتأكيد المدفوعات) */}
       {/* ========================================================================= */}
-      {adminTab === 'subscriptions' && (
-        <div className="space-y-6 animate-fadeIn">
-          {/* Action & Filter Toolbar */}
-          <div className="p-4 sm:p-5 rounded-3xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
-            {/* Search Input */}
-            <div className="relative w-full md:w-96">
-              <Search className="w-4 h-4 text-slate-500 absolute top-3.5 right-3.5 pointer-events-none" />
-              <input
-                type="text"
-                value={subSearchQuery}
-                onChange={(e) => setSubSearchQuery(e.target.value)}
-                placeholder="ابحث باسم المتجر (مثل SunVera Jolie)، الـ Transaction ID، أو رقم الهاتف..."
-                className="w-full bg-slate-950 border border-slate-700/80 rounded-2xl pr-10 pl-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
+      {adminTab === 'subscriptions' && <SubscriptionPaymentsPanel />}
 
-            {/* Filter Buttons */}
-            <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto justify-end">
-              <div className="flex items-center p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setSubStatusFilter('all')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                    subStatusFilter === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  الكل ({subscriptions.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSubStatusFilter('pending')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                    subStatusFilter === 'pending'
-                      ? 'bg-amber-500 text-slate-950 font-black'
-                      : 'text-amber-400 hover:text-white'
-                  }`}
-                >
-                  <span>بانتظار التأكيد</span>
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSubStatusFilter('active')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                    subStatusFilter === 'active' ? 'bg-emerald-600 text-white' : 'text-emerald-400 hover:text-white'
-                  }`}
-                >
-                  المفعلة
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSubStatusFilter('rejected')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                    subStatusFilter === 'rejected' ? 'bg-rose-600 text-white' : 'text-rose-400 hover:text-white'
-                  }`}
-                >
-                  المرفوضة
-                </button>
-              </div>
-
-              {/* Add Manual Sub Button */}
-              <button
-                type="button"
-                onClick={() => setShowAddSubModal(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-all cursor-pointer shadow-md shadow-emerald-500/20"
-              >
-                <Plus className="w-4 h-4" />
-                <span>إضافة معاملة يدوياً</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Subscriptions Table Card */}
-          <div className="rounded-3xl bg-slate-900 border border-slate-800 overflow-hidden shadow-2xl">
-            <div className="overflow-x-auto">
-              <table className="w-full text-right text-xs">
-                <thead className="bg-slate-950/80 text-slate-400 font-bold border-b border-slate-800 uppercase tracking-wider text-[11px]">
-                  <tr>
-                    <th className="p-4 sm:px-6">المتجر والعميل</th>
-                    <th className="p-4">الخطة والمبلغ</th>
-                    <th className="p-4">وسيلة الدفع وكود المرجع (Transaction ID)</th>
-                    <th className="p-4">تاريخ الطلب</th>
-                    <th className="p-4">حالة الحساب</th>
-                    <th className="p-4 text-center">إجراءات المراجعة الفورية</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/80 font-sans">
-                  {filteredSubscriptions.map((sub) => {
-                    const isPending = sub.status === 'pending';
-                    const isActive = sub.status === 'active';
-                    const isRejected = sub.status === 'rejected';
-
-                    return (
-                      <tr
-                        key={sub.id}
-                        className={`hover:bg-slate-850/50 transition-colors ${
-                          isPending ? 'bg-amber-950/10' : ''
-                        }`}
-                      >
-                        {/* Store & Client Details */}
-                        <td className="p-4 sm:px-6">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center font-bold text-base shrink-0">
-                              🛍️
-                            </div>
-                            <div>
-                              <div className="font-extrabold text-sm text-white flex items-center gap-1.5">
-                                <span>{sub.storeName}</span>
-                                {sub.storeName.includes('SunVera') && (
-                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-pink-500/20 text-pink-300 border border-pink-500/40">
-                                    موضة نسائية VIP
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
-                                <span>{sub.ownerName}</span>
-                                <span>•</span>
-                                <span className="text-slate-500">{sub.wilaya}</span>
-                              </div>
-                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                {sub.phone} | {sub.email}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Plan & Amount */}
-                        <td className="p-4">
-                          <div className="font-extrabold text-white">
-                            {sub.planLabel}
-                          </div>
-                          <div className="text-emerald-400 font-mono font-bold text-sm mt-0.5">
-                            {sub.amountDzd.toLocaleString('fr-DZ')}{' '}
-                            <span className="text-xs text-slate-400 font-sans">دج</span>
-                          </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            استهلاك: {sub.adGenerationsUsed} / {sub.adGenerationsLimit === 9999 ? 'غير محدود' : sub.adGenerationsLimit} إعلان
-                          </div>
-                        </td>
-
-                        {/* Payment & Transaction ID */}
-                        <td className="p-4">
-                          <div className="flex items-center gap-2 mb-1">
-                            {sub.paymentMethod === 'baridimob' ? (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                                <span>📱 بريدي موب (BaridiMob)</span>
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 flex items-center gap-1">
-                                <span>💳 الذهبية (Edahabia SATIM)</span>
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-1.5">
-                            <code className="text-xs font-mono font-bold text-indigo-300 bg-slate-950 px-2 py-1 rounded border border-slate-800" dir="ltr">
-                              {sub.transactionId}
-                            </code>
-                            <button
-                              type="button"
-                              onClick={() => handleCopyTxn(sub.transactionId)}
-                              title="نسخ كود المعاملة"
-                              className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer"
-                            >
-                              {copiedTxnId === sub.transactionId ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        </td>
-
-                        {/* Date */}
-                        <td className="p-4 font-mono text-[11px] text-slate-400">
-                          <div>{sub.createdAt}</div>
-                          {sub.activatedAt && (
-                            <div className="text-emerald-400 text-[10px]">
-                              تم التفعيل: {sub.activatedAt}
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Status */}
-                        <td className="p-4">
-                          {isPending && (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
-                              <Clock className="w-3.5 h-3.5 text-amber-400" />
-                              <span>بانتظار التأكيد</span>
-                            </span>
-                          )}
-                          {isActive && (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>مفعل ونشط ✓</span>
-                            </span>
-                          )}
-                          {isRejected && (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                              <XCircle className="w-3.5 h-3.5 text-rose-400" />
-                              <span>ملغي / مرفوض</span>
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Action Buttons */}
-                        <td className="p-4 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            {isPending && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleActivateSubscription(sub.id)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-md shadow-emerald-500/30 transition-all cursor-pointer"
-                                  title="تأكيد الدفع وتفعيل الباقة فوراً"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                  <span>تفعيل الحساب ✓</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleRejectSubscription(sub.id)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-rose-300 bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 transition-all cursor-pointer"
-                                  title="رفض المعاملة لعدم ثبوت الدفع"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                  <span>رفض ✕</span>
-                                </button>
-                              </>
-                            )}
-
-                            {isActive && (
-                              <>
-                                <span className="text-[11px] text-emerald-400 font-bold px-2 py-1 bg-emerald-950/50 rounded-lg border border-emerald-800/40">
-                                  تم التفعيل بنجاح
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleResetSubscription(sub.id)}
-                                  className="text-[10px] text-slate-400 hover:text-amber-400 underline cursor-pointer px-1"
-                                  title="إعادة للانتظار للتدقيق"
-                                >
-                                  تعديل
-                                </button>
-                              </>
-                            )}
-
-                            {isRejected && (
-                              <button
-                                type="button"
-                                onClick={() => handleActivateSubscription(sub.id)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 transition-all cursor-pointer"
-                              >
-                                إعادة تفعيل ✓
-                              </button>
-                            )}
-
-                            {/* View Receipt Proof Modal trigger */}
-                            <button
-                              type="button"
-                              onClick={() => setSelectedReceiptSub(sub)}
-                              className="p-1.5 rounded-xl text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
-                              title="عرض إشعار وتفاصيل الدفع"
-                            >
-                              <FileText className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-
-                  {filteredSubscriptions.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-slate-400">
-                        لا توجد نتائج مطابقة لبحثك في قائمة المشتركين.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* SECTION 2: Voice Samples Manager (قسم إدارة العينات الصوتية للواجهة) */}
-      {/* ========================================================================= */}
       {adminTab === 'samples' && (
         <div className="space-y-6 animate-fadeIn">
           {/* Header Action Bar */}
@@ -1638,248 +1228,6 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
       {/* ========================================================================= */}
       {/* MODAL 1: View Receipt & Subscription Details Modal */}
       {/* ========================================================================= */}
-      {selectedReceiptSub && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn" dir="rtl">
-          <div className="relative w-full max-w-lg rounded-3xl bg-slate-900 border border-indigo-500/40 p-6 sm:p-8 shadow-2xl space-y-5">
-            <button
-              type="button"
-              onClick={() => setSelectedReceiptSub(null)}
-              className="absolute top-4 left-4 p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center text-2xl font-bold">
-                📄
-              </div>
-              <div>
-                <h3 className="text-base font-black text-white">إشعار تفاصيل الدفع والمعاملة</h3>
-                <span className="text-xs text-slate-400 font-mono">
-                  معرّف الطلب: #{selectedReceiptSub.id}
-                </span>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5 text-xs text-slate-300">
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">اسم المتجر:</span>
-                <strong className="text-white">{selectedReceiptSub.storeName}</strong>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">صاحب المتجر:</span>
-                <span className="text-white">{selectedReceiptSub.ownerName}</span>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">الهاتف والولاية:</span>
-                <span className="text-white">{selectedReceiptSub.phone} ({selectedReceiptSub.wilaya})</span>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">الباقة المختارة:</span>
-                <span className="text-indigo-300 font-bold">{selectedReceiptSub.planLabel}</span>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">المبلغ المدفوع:</span>
-                <span className="text-emerald-400 font-bold font-mono text-sm">
-                  {selectedReceiptSub.amountDzd.toLocaleString('fr-DZ')} دج
-                </span>
-              </div>
-              <div className="flex justify-between border-b border-slate-850 pb-2">
-                <span className="text-slate-400">كود مرجع المعاملة (Txn ID):</span>
-                <span className="text-indigo-400 font-mono font-bold" dir="ltr">
-                  {selectedReceiptSub.transactionId}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">ملاحظة الوصل:</span>
-                <span className="text-slate-200">{selectedReceiptSub.receiptNote || 'لا توجد ملاحظات'}</span>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center justify-between gap-3 pt-2">
-              {selectedReceiptSub.status === 'pending' ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleActivateSubscription(selectedReceiptSub.id);
-                      setSelectedReceiptSub(null);
-                    }}
-                    className="flex-1 py-3 rounded-xl text-xs sm:text-sm font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-md transition-all cursor-pointer"
-                  >
-                    تأكيد وتفعيل الحساب فوراً ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleRejectSubscription(selectedReceiptSub.id);
-                      setSelectedReceiptSub(null);
-                    }}
-                    className="px-4 py-3 rounded-xl text-xs font-bold text-rose-300 bg-rose-950 border border-rose-800 hover:bg-rose-900 transition-all cursor-pointer"
-                  >
-                    رفض ✕
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setSelectedReceiptSub(null)}
-                  className="w-full py-3 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
-                >
-                  إغلاق الإشعار
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 2: Add Manual Subscription Modal */}
-      {/* ========================================================================= */}
-      {showAddSubModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn" dir="rtl">
-          <div className="relative w-full max-w-lg rounded-3xl bg-slate-900 border border-indigo-500/40 p-6 sm:p-8 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <button
-              type="button"
-              onClick={() => setShowAddSubModal(false)}
-              className="absolute top-4 left-4 p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div>
-              <h3 className="text-base font-black text-white">إضافة معاملة اشتراك محلية يدوياً</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                سجّل أي تحويل وصلك عبر الهاتف أو WhatsApp من متجر جديد.
-              </p>
-            </div>
-
-            <form onSubmit={handleAddNewSubscription} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">اسم المتجر المشترك:</label>
-                <input
-                  type="text"
-                  required
-                  value={newStoreName}
-                  onChange={(e) => setNewStoreName(e.target.value)}
-                  placeholder="مثال: متجر البهجة للإلكترونيات"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">اسم المسؤول:</label>
-                  <input
-                    type="text"
-                    value={newOwnerName}
-                    onChange={(e) => setNewOwnerName(e.target.value)}
-                    placeholder="أمين مداني"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">رقم الهاتف:</label>
-                  <input
-                    type="tel"
-                    value={newPhone}
-                    onChange={(e) => setNewPhone(e.target.value)}
-                    placeholder="0550 12 34 56"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">البريد الإلكتروني:</label>
-                  <input
-                    type="email"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    placeholder="store@domain.dz"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">الولاية:</label>
-                  <input
-                    type="text"
-                    value={newWilaya}
-                    onChange={(e) => setNewWilaya(e.target.value)}
-                    placeholder="16 - الجزائر"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">الباقة:</label>
-                  <select
-                    value={newPlan}
-                    onChange={(e) => setNewPlan(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  >
-                    <option value="starter">Starter (2,900 دج)</option>
-                    <option value="pro">Pro E-Commerce (5,900 دج)</option>
-                    <option value="business">Agency (14,500 دج)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">طريقة الدفع:</label>
-                  <select
-                    value={newMethod}
-                    onChange={(e) => setNewMethod(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  >
-                    <option value="baridimob">بريدي موب (BaridiMob)</option>
-                    <option value="edahabia">البطاقة الذهبية (Edahabia)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">
-                  كود مرجع المعاملة (Transaction ID):
-                </label>
-                <input
-                  type="text"
-                  value={newTxnId}
-                  onChange={(e) => setNewTxnId(e.target.value)}
-                  placeholder="BM-98234-DZ أو رقم الوصل"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">ملاحظة حول الوصل:</label>
-                <input
-                  type="text"
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  placeholder="تم إرسال صورة الوصل عبر واتساب"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full mt-2 py-3 rounded-xl text-xs font-black text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-all cursor-pointer shadow-lg"
-              >
-                تسجيل المعاملة وإضافتها للقائمة ➕
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 3: Add / Upload New Voice Sample Modal */}
-      {/* ========================================================================= */}
       {showAddSampleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn" dir="rtl">
           <div className="relative w-full max-w-xl rounded-3xl bg-slate-900 border border-indigo-500/40 p-6 sm:p-8 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
@@ -2158,7 +1506,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
                     type="button"
                     onClick={() => {
                       const testUrl = editSampleAudioUrl || editingSample.customAudioUrl;
-                      if (testUrl && testUrl.startsWith('data:audio')) {
+                      if (testUrl && (testUrl.startsWith('data:audio') || testUrl.startsWith('/api/showcase-samples/'))) {
                         const a = new Audio(testUrl);
                         a.play().catch(() => {
                           speakAdScript(editingSample.scriptText, editingSample.personaId);

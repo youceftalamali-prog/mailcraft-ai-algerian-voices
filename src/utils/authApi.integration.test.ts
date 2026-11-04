@@ -62,6 +62,17 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     assert.equal(me.user?.id, signup.user.id);
     assert.equal(me.user?.role, 'user');
 
+    const oversizedFreeTrialResponse = await fetch(`${baseUrl}/api/generate-persona-speech`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ scriptText: 'x'.repeat(501), persona: 'zephyr_warm' }),
+    });
+    assert.equal(oversizedFreeTrialResponse.status, 400,
+      'free-trial users must not bypass the 500-character limit with direct API requests');
+    const allowanceAfterRejectedScript = await fetch(`${baseUrl}/api/auth/allowance`, { headers: { cookie } });
+    assert.equal((await allowanceAfterRejectedScript.json() as { remaining: number }).remaining, 1,
+      'rejected oversized input must not consume the free-trial generation');
+
     const userAdminResponse = await fetch(`${baseUrl}/api/admin/system-stats`, { headers: { cookie } });
     assert.equal(userAdminResponse.status, 403, 'ordinary users must not access admin endpoints');
 
@@ -103,6 +114,15 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     const expiredSessionResponse = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: loginCookie } });
     assert.deepEqual(await expiredSessionResponse.json(), { authenticated: false },
       'expired sessions must not authenticate requests');
+    const paymentLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'login', email: userEmail, password: userPassword }),
+    });
+    assert.equal(paymentLoginResponse.status, 200);
+    const paymentCookie = (paymentLoginResponse.headers.get('set-cookie') || '').match(/dz_session=[a-f0-9]{64}/)?.[0];
+    assert.ok(paymentCookie, 'customer must have an active session to submit a payment request');
+
 
     // Simulate a legacy owner row with a downgraded role in the disposable DB.
     const owner = await registerOrGetUser(ADMIN_EMAIL, 'admin');
@@ -141,6 +161,95 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
       headers: { cookie: adminCookie },
     });
     assert.equal(adminRouteResponse.status, 200, 'verified owner must access admin endpoints');
+    const paymentRequestResponse = await fetch(`${baseUrl}/api/subscriptions/requests`, {
+      method: 'POST',
+      headers: { cookie: paymentCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        plan: 'starter', billingCycle: 'monthly', paymentMethod: 'baridimob',
+        transactionReference: `CI-TRANSFER-${Date.now()}`, amountDzd: 1,
+        receiptDataUrl: `data:image/png;base64,${Buffer.from([137,80,78,71,13,10,26,10]).toString('base64')}`,
+        receiptFilename: 'receipt.png',
+      }),
+    });
+    assert.equal(paymentRequestResponse.status, 201, 'authenticated customer can submit a payment request');
+    const paymentRequestPayload = await paymentRequestResponse.json() as {
+      request: { id: string; amountDzd: number; status: string; email: string; receiptAvailable: boolean };
+    };
+    assert.equal(paymentRequestPayload.request.amountDzd, 2900, 'server must calculate the amount and ignore client-supplied price');
+    assert.equal(paymentRequestPayload.request.status, 'pending');
+    assert.equal(paymentRequestPayload.request.receiptAvailable, true, 'uploaded receipt must be stored and marked available');
+    assert.equal(paymentRequestPayload.request.email.toLowerCase(), userEmail.toLowerCase());
+
+    const secondPendingRequest = await fetch(`${baseUrl}/api/subscriptions/requests`, {
+      method: 'POST',
+      headers: { cookie: paymentCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        plan: 'pro', billingCycle: 'annual', paymentMethod: 'baridimob',
+        transactionReference: `CI-SECOND-${Date.now()}`,
+      }),
+    });
+    assert.equal(secondPendingRequest.status, 409, 'a user cannot open multiple pending payment requests');
+
+    const customerRequestsResponse = await fetch(`${baseUrl}/api/subscriptions/requests`, {
+      headers: { cookie: paymentCookie },
+    });
+    assert.equal(customerRequestsResponse.status, 200);
+    const customerRequests = await customerRequestsResponse.json() as { requests: Array<{ id: string }> };
+    assert.equal(customerRequests.requests.length, 1, 'customers can only read their own payment requests');
+
+    const pendingAdminRequests = await fetch(`${baseUrl}/api/admin/subscription-requests?status=pending`, {
+      headers: { cookie: adminCookie },
+    });
+    assert.equal(pendingAdminRequests.status, 200, 'verified owner can review payment requests');
+    const pendingPayload = await pendingAdminRequests.json() as { requests: Array<{ id: string; userId: string }> };
+    const requestToApprove = pendingPayload.requests.find((request) => request.id === paymentRequestPayload.request.id);
+    assert.ok(requestToApprove, 'submitted payment request must appear in admin queue');
+    const receiptResponse = await fetch(`${baseUrl}/api/admin/subscription-requests/${paymentRequestPayload.request.id}/receipt`, {
+      headers: { cookie: adminCookie },
+    });
+    assert.equal(receiptResponse.status, 200, 'only the authenticated owner can read a submitted receipt');
+    assert.equal(receiptResponse.headers.get('content-type'), 'image/png');
+    assert.equal((await receiptResponse.arrayBuffer()).byteLength, 8);
+
+    const approvePaymentResponse = await fetch(`${baseUrl}/api/admin/subscription-requests/${paymentRequestPayload.request.id}`, {
+      method: 'PATCH',
+      headers: { cookie: adminCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'approved' }),
+    });
+    assert.equal(approvePaymentResponse.status, 200, 'admin approval must succeed after manual verification');
+    const activatedUser = await getDatabasePool().query(
+      'SELECT plan, monthly_generations_limit, subscription_expires_at FROM app_users WHERE id=$1',
+      [signup.user.id],
+    );
+    assert.equal(activatedUser.rows[0]?.plan, 'starter');
+    assert.equal(Number(activatedUser.rows[0]?.monthly_generations_limit), 50);
+    assert.ok(activatedUser.rows[0]?.subscription_expires_at, 'approval must set a subscription expiry');
+    await getDatabasePool().query(
+      "UPDATE app_users SET monthly_generations_used=50, monthly_usage_resets_at=NOW() - INTERVAL '1 day' WHERE id=$1",
+      [signup.user.id],
+    );
+    const allowanceResetResponse = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: paymentCookie } });
+    const allowanceReset = await allowanceResetResponse.json() as { user?: { plan: string; monthlyGenerationsUsed: number } };
+    assert.equal(allowanceReset.user?.plan, 'starter');
+    assert.equal(allowanceReset.user?.monthlyGenerationsUsed, 0, 'paid allowance must reset at the monthly boundary');
+
+    await getDatabasePool().query(
+      "UPDATE app_users SET subscription_expires_at=NOW() - INTERVAL '1 second' WHERE id=$1",
+      [signup.user.id],
+    );
+    const expiredPlanResponse = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: paymentCookie } });
+    const expiredPlan = await expiredPlanResponse.json() as { user?: { plan: string; monthlyGenerationsLimit: number } };
+    assert.equal(expiredPlan.user?.plan, 'free', 'expired subscriptions must be downgraded server-side');
+    assert.equal(expiredPlan.user?.monthlyGenerationsLimit, 0);
+
+
+    const repeatedApproval = await fetch(`${baseUrl}/api/admin/subscription-requests/${paymentRequestPayload.request.id}`, {
+      method: 'PATCH',
+      headers: { cookie: adminCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'approved' }),
+    });
+    assert.equal(repeatedApproval.status, 409, 'a payment request cannot be approved twice');
+
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());

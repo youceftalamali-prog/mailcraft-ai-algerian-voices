@@ -3,11 +3,13 @@ import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
+  getDatabasePool,
   getRequestEnvironmentValue,
   getWorkerDatabaseContextStatus,
   runWithRegisteredWorkerDatabaseContext,
   verifyDatabaseConnection,
 } from './src/server/database';
+import { INITIAL_SHOWCASE_SAMPLES } from './src/services/adminStore';
 import { generateEcommerceAdSpeech } from './src/services/algerianEcommerceVoiceService';
 import { generatePersonaSpeech, ALGIERS_PERSONA_REGISTRY } from './src/services/algerianPersonaVoiceService';
 import { scrapeProductUrl, generateAdScriptFromProduct } from './src/services/productScraperService';
@@ -31,6 +33,11 @@ import {
   updateUser,
   consumeGenerationAllowance,
   getAllUsers,
+  createSubscriptionPaymentRequest,
+  getUserSubscriptionPaymentRequests,
+  listSubscriptionPaymentRequests,
+  getSubscriptionPaymentReceipt,
+  reviewSubscriptionPaymentRequest,
   ADMIN_EMAIL as SECURITY_ADMIN_EMAIL,
 } from './src/server/security';
 
@@ -299,9 +306,129 @@ app.post('/api/auth/admin-login', authLimiter, async (req: Request, res: Respons
   } });
 });
 
-// Google sign-in is intentionally disabled until a verified Google ID token flow is configured.
-app.post('/api/auth/google', authLimiter, (_req: Request, res: Response): void => {
-  res.status(501).json({ error: 'GOOGLE_OAUTH_NOT_CONFIGURED', message: 'تسجيل Google غير مفعّل حالياً. استخدم البريد وكلمة المرور إلى حين إعداد OAuth والتحقق من رمز Google على الخادم.' });
+type GoogleIdTokenClaims = {
+  iss?: string;
+  aud?: string | string[];
+  exp?: number;
+  iat?: number;
+  sub?: string;
+  email?: string;
+  email_verified?: boolean;
+  azp?: string;
+};
+
+type GoogleSigningJwk = JsonWebKey & { kid?: string; use?: string };
+let googleJwksCache: { keys: GoogleSigningJwk[]; expiresAt: number } | null = null;
+
+function decodeBase64UrlJson<T>(segment: string): T {
+  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+  return JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as T;
+}
+
+async function getGoogleSigningKeys(): Promise<GoogleSigningJwk[]> {
+  if (googleJwksCache && googleJwksCache.expiresAt > Date.now()) return googleJwksCache.keys;
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/certs', {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error('GOOGLE_SIGNING_KEYS_UNAVAILABLE');
+  const payload = await response.json() as { keys?: GoogleSigningJwk[] };
+  if (!Array.isArray(payload.keys) || payload.keys.length === 0) throw new Error('GOOGLE_SIGNING_KEYS_INVALID');
+  const cacheControl = response.headers.get('cache-control') || '';
+  const maxAge = Number(cacheControl.match(/max-age=(\d+)/i)?.[1] || 300);
+  googleJwksCache = { keys: payload.keys, expiresAt: Date.now() + Math.min(Math.max(maxAge, 60), 3600) * 1000 };
+  return payload.keys;
+}
+
+async function verifyGoogleIdToken(idToken: string, clientId: string): Promise<GoogleIdTokenClaims | null> {
+  if (idToken.length > 12_000) return null;
+  const segments = idToken.split('.');
+  if (segments.length !== 3) return null;
+
+  try {
+    const header = decodeBase64UrlJson<{ alg?: string; kid?: string }>(segments[0]);
+    const claims = decodeBase64UrlJson<GoogleIdTokenClaims>(segments[1]);
+    if (header.alg !== 'RS256' || !header.kid) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    if (
+      (claims.iss !== 'https://accounts.google.com' && claims.iss !== 'accounts.google.com') ||
+      !audiences.includes(clientId) ||
+      (audiences.length > 1 && claims.azp !== clientId) ||
+      typeof claims.exp !== 'number' || claims.exp <= now ||
+      typeof claims.iat !== 'number' || claims.iat > now + 300 ||
+      typeof claims.sub !== 'string' || claims.sub.length < 1 ||
+      typeof claims.email !== 'string' || claims.email.length > 254 ||
+      claims.email_verified !== true
+    ) return null;
+
+    const jwk = (await getGoogleSigningKeys()).find((key) => key.kid === header.kid && key.kty === 'RSA' && key.use === 'sig');
+    if (!jwk) {
+      googleJwksCache = null;
+      const refreshed = await getGoogleSigningKeys();
+      const refreshedKey = refreshed.find((key) => key.kid === header.kid && key.kty === 'RSA' && key.use === 'sig');
+      if (!refreshedKey) return null;
+      const publicKey = await crypto.subtle.importKey('jwk', refreshedKey, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+      const signature = Buffer.from(segments[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+      const signedContent = new TextEncoder().encode(segments[0] + '.' + segments[1]);
+      return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', publicKey, signature, signedContent) ? claims : null;
+    }
+    const publicKey = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const signature = Buffer.from(segments[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    const signedContent = new TextEncoder().encode(segments[0] + '.' + segments[1]);
+    return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', publicKey, signature, signedContent) ? claims : null;
+  } catch {
+    return null;
+  }
+}
+
+// Google Identity Services ID-token sign-in. The browser token is never trusted
+// until its signature and OIDC claims are verified against Google's published keys.
+app.post('/api/auth/google', authLimiter, async (req: Request, res: Response): Promise<void> => {
+  const clientId = getRequestEnvironmentValue('GOOGLE_CLIENT_ID');
+  if (!clientId) {
+    res.status(503).json({ error: 'GOOGLE_AUTH_NOT_CONFIGURED', message: 'تسجيل Google غير مهيأ في بيئة المعاينة.' });
+    return;
+  }
+  const credential = req.body?.credential;
+  if (typeof credential !== 'string' || !credential) {
+    res.status(400).json({ error: 'GOOGLE_CREDENTIAL_REQUIRED', message: 'لم يصل رمز تسجيل الدخول من Google.' });
+    return;
+  }
+
+  const claims = await verifyGoogleIdToken(credential, clientId);
+  if (!claims?.email) {
+    res.status(401).json({ error: 'GOOGLE_TOKEN_INVALID', message: 'تعذر التحقق من حساب Google. أعد المحاولة.' });
+    return;
+  }
+
+  const email = claims.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email === SECURITY_ADMIN_EMAIL.toLowerCase()) {
+    res.status(403).json({ error: 'GOOGLE_ACCOUNT_NOT_ALLOWED', message: 'حساب المالك يستخدم تسجيل الدخول الإداري المنفصل.' });
+    return;
+  }
+
+  try {
+    let user = await getUserByEmail(email);
+    if (!user) user = await registerOrGetUser(email, 'user');
+    if (user.role !== 'user') {
+      res.status(403).json({ error: 'GOOGLE_ACCOUNT_NOT_ALLOWED', message: 'هذا الحساب غير متاح لتسجيل الدخول عبر Google.' });
+      return;
+    }
+    user = (await updateUser(user.id, { lastLoginAt: new Date().toISOString() })) || user;
+    const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
+    const session = await createSession(user.id, ip);
+    setAuthCookie(res, session.token);
+    res.json({ success: true, user: {
+      id: user.id, email: user.email, role: user.role, plan: user.plan,
+      trialGenerationsUsed: user.trialGenerationsUsed, trialGenerationsLimit: user.trialGenerationsLimit,
+      monthlyGenerationsUsed: user.monthlyGenerationsUsed, monthlyGenerationsLimit: user.monthlyGenerationsLimit,
+    } });
+  } catch (error) {
+    console.error('Google sign-in account/session creation failed:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(500).json({ error: 'GOOGLE_SIGN_IN_FAILED', message: 'تعذر إكمال تسجيل الدخول. حاول مرة أخرى.' });
+  }
 });
 
 // Endpoint: Get Current Authenticated Session & User Profile
@@ -801,6 +928,249 @@ app.get('/api/personas', (_req: Request, res: Response): void => {
   });
 });
 
+// ----------------------------------------------------------------------------
+// PUBLIC SHOWCASE AUDIO — samples are stored centrally in PostgreSQL.
+// Visitors receive play-only URLs; the audio endpoint is inline and cacheable.
+// ----------------------------------------------------------------------------
+
+function showcaseSampleFromRow(row: any) {
+  const audioHash = typeof row.audio_sha256 === 'string' ? row.audio_sha256.trim() : '';
+  return {
+    id: row.id,
+    personaId: row.persona_id,
+    title: row.title,
+    category: row.category,
+    personaTitle: row.persona_title,
+    avatarIcon: row.avatar_icon,
+    accentBadge: row.accent_badge,
+    scriptText: row.script_text,
+    durationLabel: row.duration_label,
+    voiceName: row.voice_name,
+    createdAt: row.created_at,
+    isCustomUpload: Boolean(audioHash),
+    ...(audioHash
+      ? { customAudioUrl: `/api/showcase-samples/${encodeURIComponent(row.id)}/audio/${audioHash}` }
+      : {}),
+  };
+}
+
+async function initializeShowcaseSamplesIfNeeded(): Promise<void> {
+  const client = await getDatabasePool().connect();
+  try {
+    await client.query('BEGIN');
+    const state = await client.query(
+      'SELECT initialized FROM showcase_sample_state WHERE id=1 FOR UPDATE'
+    );
+    if (!state.rows[0]?.initialized) {
+      for (const sample of INITIAL_SHOWCASE_SAMPLES) {
+        await client.query(
+          `INSERT INTO showcase_audio_samples
+            (id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
+             script_text, duration_label, voice_name, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           ON CONFLICT (id) DO NOTHING`,
+          [
+            sample.id, sample.personaId, sample.title, sample.category, sample.personaTitle,
+            sample.avatarIcon, sample.accentBadge, sample.scriptText, sample.durationLabel,
+            sample.voiceName, sample.createdAt || new Date().toISOString().slice(0, 10),
+          ],
+        );
+      }
+      await client.query(
+        'UPDATE showcase_sample_state SET initialized=TRUE WHERE id=1'
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Public metadata only. Audio bytes are served separately after the visitor
+// presses Play, so they are not downloaded while merely browsing the page.
+app.get('/api/showcase-samples', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    await initializeShowcaseSamplesIfNeeded();
+    const result = await getDatabasePool().query(
+      `SELECT id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
+              script_text, duration_label, voice_name, created_at, audio_sha256
+       FROM showcase_audio_samples ORDER BY created_at DESC, id ASC`,
+    );
+    res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    res.json({ success: true, samples: result.rows.map(showcaseSampleFromRow) });
+  } catch (error) {
+    console.error('Failed to load showcase samples:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(503).json({ success: false, message: 'تعذر تحميل نماذج الأصوات حالياً.' });
+  }
+});
+
+// Hashed URLs allow a browser to keep one recording in its HTTP cache and
+// reuse it for repeat plays. Updating the recording creates a different URL.
+app.get('/api/showcase-samples/:id/audio/:hash', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, hash } = req.params;
+    const result = await getDatabasePool().query(
+      'SELECT audio_data, audio_mime_type, audio_sha256 FROM showcase_audio_samples WHERE id=$1',
+      [id],
+    );
+    const row = result.rows[0];
+    if (!row || !row.audio_data || row.audio_sha256 !== hash) {
+      res.status(404).json({ message: 'التسجيل الصوتي غير موجود.' });
+      return;
+    }
+
+    const etag = `"${hash}"`;
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('ETag', etag);
+    res.setHeader('Content-Type', row.audio_mime_type || 'audio/mpeg');
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Accept-Ranges', 'none');
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
+    const audio = Buffer.isBuffer(row.audio_data) ? row.audio_data : Buffer.from(row.audio_data);
+    res.status(200).send(audio);
+  } catch (error) {
+    console.error('Failed to stream showcase audio:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(503).json({ message: 'تعذر تشغيل التسجيل الصوتي حالياً.' });
+  }
+});
+
+// Admin-only metadata synchronization. Audio blobs are uploaded separately as
+// binary data so the JSON payload remains small and no data URLs are saved.
+app.put('/api/admin/showcase-samples', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const samples = req.body?.samples;
+  if (!Array.isArray(samples) || samples.length > 50) {
+    res.status(400).json({ message: 'قائمة العينات غير صالحة.' });
+    return;
+  }
+
+  const normalized: any[] = [];
+  const seen = new Set<string>();
+  for (const sample of samples) {
+    if (!sample || typeof sample !== 'object') {
+      res.status(400).json({ message: 'بيانات إحدى العينات غير صالحة.' });
+      return;
+    }
+    const fields = [
+      ['id', 100], ['title', 180], ['category', 120], ['personaTitle', 120],
+      ['avatarIcon', 20], ['accentBadge', 180], ['scriptText', 5000],
+      ['durationLabel', 40], ['voiceName', 40], ['personaId', 60],
+    ] as const;
+    for (const [field, maxLength] of fields) {
+      if (typeof sample[field] !== 'string' || !sample[field].trim() || sample[field].length > maxLength) {
+        res.status(400).json({ message: `قيمة غير صالحة في الحقل ${field}.` });
+        return;
+      }
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(sample.id) || seen.has(sample.id) ||
+        !Object.prototype.hasOwnProperty.call(ALGIERS_PERSONA_REGISTRY, sample.personaId)) {
+      res.status(400).json({ message: 'معرّف العينة أو الشخصية الصوتية غير صالح.' });
+      return;
+    }
+    seen.add(sample.id);
+    normalized.push(sample);
+  }
+
+  const client = await getDatabasePool().connect();
+  try {
+    await client.query('BEGIN');
+    if (normalized.length === 0) {
+      await client.query('DELETE FROM showcase_audio_samples');
+    } else {
+      await client.query(
+        'DELETE FROM showcase_audio_samples WHERE NOT (id = ANY($1::text[]))',
+        [normalized.map((sample) => sample.id)],
+      );
+    }
+    for (const sample of normalized) {
+      await client.query(
+        `INSERT INTO showcase_audio_samples
+          (id, persona_id, title, category, persona_title, avatar_icon, accent_badge,
+           script_text, duration_label, voice_name, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (id) DO UPDATE SET
+           persona_id=EXCLUDED.persona_id, title=EXCLUDED.title, category=EXCLUDED.category,
+           persona_title=EXCLUDED.persona_title, avatar_icon=EXCLUDED.avatar_icon,
+           accent_badge=EXCLUDED.accent_badge, script_text=EXCLUDED.script_text,
+           duration_label=EXCLUDED.duration_label, voice_name=EXCLUDED.voice_name,
+           created_at=EXCLUDED.created_at, updated_at=NOW()`,
+        [
+          sample.id, sample.personaId, sample.title, sample.category, sample.personaTitle,
+          sample.avatarIcon, sample.accentBadge, sample.scriptText, sample.durationLabel,
+          sample.voiceName, typeof sample.createdAt === 'string' ? sample.createdAt : new Date().toISOString().slice(0, 10),
+        ],
+      );
+    }
+    await client.query('UPDATE showcase_sample_state SET initialized=TRUE WHERE id=1');
+    await client.query('COMMIT');
+    res.json({ success: true, count: normalized.length });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to save admin showcase samples:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(500).json({ message: 'تعذر حفظ نماذج الأصوات.' });
+  } finally {
+    client.release();
+  }
+});
+
+// Admin uploads only the actual selected/generated recording. A 5 MB cap
+// keeps the upload bounded while allowing short WAV and MP3 showcases.
+app.put('/api/admin/showcase-samples/:id/audio', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+    res.status(400).json({ message: 'معرّف العينة غير صالح.' });
+    return;
+  }
+
+  const contentTypeHeader = req.headers['content-type'];
+  const mimeType = (typeof contentTypeHeader === 'string' ? contentTypeHeader : '').split(';')[0].trim().toLowerCase();
+  const allowedMimeTypes = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/mp4', 'audio/aac']);
+  if (!allowedMimeTypes.has(mimeType)) {
+    res.status(415).json({ message: 'صيغة الملف غير مدعومة. استخدم MP3 أو WAV أو OGG أو WEBM.' });
+    return;
+  }
+
+  try {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    for await (const chunk of req) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.byteLength;
+      if (totalBytes > 5 * 1024 * 1024) {
+        res.status(413).json({ message: 'حجم التسجيل يتجاوز 5 ميغابايت.' });
+        return;
+      }
+      chunks.push(buffer);
+    }
+    if (totalBytes === 0) {
+      res.status(400).json({ message: 'ملف الصوت فارغ.' });
+      return;
+    }
+    const audio = Buffer.concat(chunks);
+    const audioHash = crypto.createHash('sha256').update(audio).digest('hex');
+    const updated = await getDatabasePool().query(
+      `UPDATE showcase_audio_samples
+       SET audio_data=$1, audio_mime_type=$2, audio_sha256=$3, updated_at=NOW()
+       WHERE id=$4 RETURNING id`,
+      [audio, mimeType, audioHash, id],
+    );
+    if (!updated.rowCount) {
+      res.status(404).json({ message: 'العينة غير موجودة. احفظ بياناتها أولاً.' });
+      return;
+    }
+    res.json({ success: true, audioUrl: `/api/showcase-samples/${encodeURIComponent(id)}/audio/${audioHash}` });
+  } catch (error) {
+    console.error('Failed to upload showcase audio:', error instanceof Error ? error.name : 'UnknownError');
+    res.status(500).json({ message: 'تعذر حفظ ملف الصوت.' });
+  }
+});
+
 // Endpoint: Admin Test & Verify Gemini API Key / Model Connection (Protected by requireAdmin)
 app.post('/api/admin/verify-api-key', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
@@ -868,6 +1238,147 @@ app.post('/api/admin/verify-api-key', adminLimiter, requireAdmin, async (req: Re
   }
 });
 
+
+const subscriptionPaymentLimiter = rateLimiter({
+  windowMs: 60 * 60 * 1000,
+  maxRequests: 5,
+  message: 'تم تجاوز عدد طلبات الدفع. حاول لاحقاً.',
+});
+
+// Customers submit a payment reference after completing a manual transfer.
+// The server derives the price from the selected plan and billing cycle.
+app.post('/api/subscriptions/requests', subscriptionPaymentLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const { plan, billingCycle, paymentMethod, transactionReference, senderName, receiptNote } = req.body || {};
+  if (req.user?.role !== 'user') {
+    res.status(403).json({ error: 'CUSTOMER_ACCOUNT_REQUIRED', message: 'طلبات الاشتراك متاحة لحسابات العملاء فقط.' });
+    return;
+  }
+  if (typeof req.body.receiptDataUrl !== 'undefined' && typeof req.body.receiptDataUrl !== 'string') {
+    res.status(400).json({ error: 'INVALID_RECEIPT_FILE', message: 'ملف الإيصال غير صالح.' });
+    return;
+  }
+  if (!['starter','pro','business'].includes(plan)
+    || !['monthly','annual'].includes(billingCycle)
+    || paymentMethod !== 'baridimob'
+    || typeof transactionReference !== 'string'
+    || typeof senderName !== 'undefined' && typeof senderName !== 'string'
+    || typeof receiptNote !== 'undefined' && typeof receiptNote !== 'string') {
+    res.status(400).json({ error: 'INVALID_PAYMENT_REQUEST', message: 'بيانات طلب الدفع غير مكتملة أو غير صالحة.' });
+    return;
+  }
+  try {
+    let receiptData: Buffer | undefined;
+    let receiptMimeType: string | undefined;
+    let receiptFilename: string | undefined;
+    if (typeof req.body.receiptDataUrl === 'string' && req.body.receiptDataUrl) {
+      const match = req.body.receiptDataUrl.match(/^data:(image[/](?:png|jpeg)|application[/]pdf);base64,([A-Za-z0-9+/=]+)$/);
+      if (!match || match[2].length > 900_000) {
+        res.status(400).json({ error: 'INVALID_RECEIPT_FILE', message: 'صيغة الإيصال غير مدعومة أو حجمه كبير.' });
+        return;
+      }
+      receiptMimeType = match[1];
+      receiptData = Buffer.from(match[2], 'base64');
+      if (receiptData.length > 650 * 1024) {
+        res.status(413).json({ error: 'RECEIPT_TOO_LARGE', message: 'الحد الأقصى لحجم الإيصال 650 كيلوبايت.' });
+        return;
+      }
+      const validSignature = receiptMimeType === 'image/png'
+        ? receiptData.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
+        : receiptMimeType === 'image/jpeg'
+          ? receiptData[0] === 0xff && receiptData[1] === 0xd8 && receiptData[2] === 0xff
+          : receiptData.subarray(0,5).toString('ascii') === '%PDF-';
+      if (!validSignature) {
+        res.status(400).json({ error: 'INVALID_RECEIPT_CONTENT', message: 'محتوى الملف لا يطابق نوعه.' });
+        return;
+      }
+      receiptFilename = typeof req.body.receiptFilename === 'string'
+        ? req.body.receiptFilename.replace(/[^A-Za-z0-9._-]/g, '_').slice(0,180)
+        : 'payment-receipt';
+    }
+    const request = await createSubscriptionPaymentRequest({
+      userId: req.user!.id, plan, billingCycle, paymentMethod, transactionReference,
+      senderName, receiptNote, receiptData, receiptMimeType, receiptFilename,
+    });
+    res.status(201).json({ success: true, request });
+  } catch (error: any) {
+    const code = error instanceof Error ? error.message : '';
+    const known: Record<string, { status: number; message: string }> = {
+      INVALID_TRANSACTION_REFERENCE: { status: 400, message: 'رقم مرجع التحويل يجب أن يكون بين 5 و100 حرف.' },
+      PENDING_PAYMENT_EXISTS: { status: 409, message: 'لديك طلب دفع قيد المراجعة بالفعل.' },
+      DUPLICATE_TRANSACTION_REFERENCE: { status: 409, message: 'رقم المعاملة مستخدم من قبل. تحقق من الرقم.' },
+    };
+    const issue = known[code];
+    if (issue) { res.status(issue.status).json({ error: code, message: issue.message }); return; }
+    throw error;
+  }
+});
+
+app.get('/api/subscriptions/requests', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const requests = await getUserSubscriptionPaymentRequests(req.user!.id);
+  res.json({ success: true, requests });
+});
+
+app.get('/api/admin/subscription-requests/:id/receipt', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const receipt = await getSubscriptionPaymentReceipt(req.params.id);
+  if (!receipt) { res.status(404).json({ error: 'RECEIPT_NOT_FOUND' }); return; }
+  res.setHeader('Content-Type', receipt.mimeType);
+  res.setHeader('Content-Length', receipt.data.length);
+  res.setHeader('Content-Disposition', `attachment; filename="${receipt.filename.replace(/["\\\\]/g, '_')}"`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(receipt.data);
+});
+
+app.get('/api/admin/subscription-summary', adminLimiter, requireAdmin, async (_req: Request, res: Response): Promise<void> => {
+  const result = await getDatabasePool().query(`
+    SELECT
+      (SELECT COUNT(*)::integer FROM app_users WHERE role='user') AS total_users,
+      (SELECT COUNT(*)::integer FROM subscription_payment_requests WHERE status='pending') AS pending_requests,
+      (SELECT COUNT(*)::integer FROM app_users WHERE role='user' AND plan <> 'free' AND subscription_expires_at > NOW()) AS active_subscribers,
+      (SELECT COALESCE(SUM(amount_dzd),0)::bigint FROM subscription_payment_requests WHERE status='approved') AS verified_revenue_dzd
+  `);
+  const row = result.rows[0];
+  res.json({
+    totalUsers: Number(row.total_users || 0),
+    pendingRequests: Number(row.pending_requests || 0),
+    activeSubscribers: Number(row.active_subscribers || 0),
+    verifiedRevenueDzd: Number(row.verified_revenue_dzd || 0),
+  });
+});
+
+app.get('/api/admin/subscription-requests', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const status = req.query.status;
+  if (status !== undefined && !['pending','approved','rejected'].includes(String(status))) {
+    res.status(400).json({ error: 'INVALID_STATUS' }); return;
+  }
+  const requests = await listSubscriptionPaymentRequests(status as 'pending'|'approved'|'rejected'|undefined);
+  res.json({ success: true, requests });
+});
+
+app.patch('/api/admin/subscription-requests/:id', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  const { decision, rejectionReason } = req.body || {};
+  if (!['approved','rejected'].includes(decision)
+    || typeof rejectionReason !== 'undefined' && typeof rejectionReason !== 'string') {
+    res.status(400).json({ error: 'INVALID_REVIEW_DECISION' }); return;
+  }
+  try {
+    const request = await reviewSubscriptionPaymentRequest({
+      requestId: req.params.id, adminUserId: req.user!.id, decision, rejectionReason,
+    });
+    res.json({ success: true, request });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : '';
+    const known: Record<string, { status: number; message: string }> = {
+      PAYMENT_REQUEST_NOT_FOUND: { status: 404, message: 'طلب الدفع غير موجود.' },
+      PAYMENT_REQUEST_ALREADY_REVIEWED: { status: 409, message: 'تمت مراجعة هذا الطلب مسبقاً.' },
+    };
+    const issue = known[code];
+    if (issue) { res.status(issue.status).json({ error: code, message: issue.message }); return; }
+    throw error;
+  }
+});
+
+
 // Endpoint: Admin System Stats (Protected by requireAdmin)
 app.get('/api/admin/system-stats', adminLimiter, requireAdmin, (_req: Request, res: Response): void => {
   res.json({
@@ -909,7 +1420,29 @@ app.get('/api/admin/users', adminLimiter, requireAdmin, async (_req: Request, re
 });
 
 // Endpoint: Conflict-Free Algiers Persona & Emotion Voice Synthesis (Rate limited & usage controlled)
-app.post('/api/generate-persona-speech', genLimiter, requireAuth, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
+// Enforce the free-trial character limit on the server, not only in the browser.
+// Paid plans and the owner retain the existing 2,500-character ceiling.
+function enforcePersonaScriptLimit(req: Request, res: Response, next: NextFunction): void {
+  const scriptText = req.body?.scriptText;
+  if (typeof scriptText !== 'string' || !scriptText.trim()) {
+    res.status(400).json({ error: 'INVALID_SCRIPT', message: 'النص مطلوب.' });
+    return;
+  }
+  const maxCharacters = req.user?.role === 'admin' || req.user?.plan !== 'free' ? 2500 : 500;
+  if (scriptText.length > maxCharacters) {
+    res.status(400).json({
+      error: 'SCRIPT_TOO_LONG',
+      maxCharacters,
+      message: maxCharacters === 500
+        ? 'الحد الأقصى للنص في التجربة المجانية هو 500 حرف.'
+        : 'الحد الأقصى للنص هو 2500 حرف.',
+    });
+    return;
+  }
+  next();
+}
+
+app.post('/api/generate-persona-speech', genLimiter, requireAuth, enforcePersonaScriptLimit, consumeGenerationAllowance, async (req: Request, res: Response): Promise<void> => {
   try {
     const { scriptText, persona, emotionalCue, extraDirectives } = req.body;
     if (typeof scriptText !== 'string' || !scriptText.trim() || scriptText.length > 2500) {
