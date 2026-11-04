@@ -163,7 +163,9 @@ export const INITIAL_SHOWCASE_SAMPLES: ShowcaseAudioSample[] = [
 ];
 
 // Initial Subscriptions Seed Data with SunVera Jolie and other Algerian stores
-export const INITIAL_SUBSCRIPTIONS: AdminSubscription[] = [];\n\n// Initial AI & API Settings
+export const INITIAL_SUBSCRIPTIONS: AdminSubscription[] = [];
+
+// Initial AI & API Settings
 export const INITIAL_AI_SETTINGS: AdminAISettings = {
   primaryModel: 'gemini-3.8-flash',
   ttsModel: 'gemini-3.8-flash-lite-tts',
