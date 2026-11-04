@@ -26,7 +26,8 @@ const userFromRow = (r: any): ServerUser => ({
   monthlyGenerationsUsed: Number(r.monthly_generations_used),
   monthlyGenerationsLimit: Number(r.monthly_generations_limit),
   createdAt: new Date(r.created_at).toISOString(),
-  subscriptionExpiresAt: r.subscription_expires_at ? new Date(r.subscription_expires_at).toISOString() : null,\n  lastLoginAt: new Date(r.last_login_at).toISOString(),
+  subscriptionExpiresAt: r.subscription_expires_at ? new Date(r.subscription_expires_at).toISOString() : null,
+  lastLoginAt: new Date(r.last_login_at).toISOString(),
 });
 const sessionFromRow = (r: any, token: string): ServerSession => ({
   token, userId: r.user_id, createdAt: new Date(r.created_at).getTime(),
@@ -416,7 +417,8 @@ export async function reviewSubscriptionPaymentRequest(input: {
     throw error;
   } finally { client.release(); }
 }
-\nexport function checkGenerationAllowance(user?: ServerUser): { allowed: boolean; reason?: string; remaining?: number; plan: string } {
+
+export function checkGenerationAllowance(user?: ServerUser): { allowed: boolean; reason?: string; remaining?: number; plan: string } {
   if (!user) return { allowed: true, remaining: 1, plan: 'free' };
   if (user.role === 'admin') return { allowed: true, remaining: 999999, plan: 'admin_unlimited' };
   if (user.plan !== 'free') {
