@@ -312,7 +312,8 @@ type GoogleIdTokenClaims = {
   azp?: string;
 };
 
-let googleJwksCache: { keys: JsonWebKey[]; expiresAt: number } | null = null;
+type GoogleSigningJwk = JsonWebKey & { kid?: string; use?: string };
+let googleJwksCache: { keys: GoogleSigningJwk[]; expiresAt: number } | null = null;
 
 function decodeBase64UrlJson<T>(segment: string): T {
   const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
@@ -320,13 +321,13 @@ function decodeBase64UrlJson<T>(segment: string): T {
   return JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as T;
 }
 
-async function getGoogleSigningKeys(): Promise<JsonWebKey[]> {
+async function getGoogleSigningKeys(): Promise<GoogleSigningJwk[]> {
   if (googleJwksCache && googleJwksCache.expiresAt > Date.now()) return googleJwksCache.keys;
   const response = await fetch('https://www.googleapis.com/oauth2/v3/certs', {
     headers: { Accept: 'application/json' },
   });
   if (!response.ok) throw new Error('GOOGLE_SIGNING_KEYS_UNAVAILABLE');
-  const payload = await response.json() as { keys?: JsonWebKey[] };
+  const payload = await response.json() as { keys?: GoogleSigningJwk[] };
   if (!Array.isArray(payload.keys) || payload.keys.length === 0) throw new Error('GOOGLE_SIGNING_KEYS_INVALID');
   const cacheControl = response.headers.get('cache-control') || '';
   const maxAge = Number(cacheControl.match(/max-age=(\d+)/i)?.[1] || 300);
