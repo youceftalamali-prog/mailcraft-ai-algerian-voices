@@ -14,6 +14,7 @@ interface WorkerEnv {
   HYPERDRIVE?: { connectionString: string };
   GEMINI_API_KEY?: string;
   ADMIN_PASSWORD?: string;
+  GOOGLE_CLIENT_ID?: string;
 }
 
 // Cloudflare's Node HTTP integration preserves the existing Express routes.
@@ -53,7 +54,7 @@ export default {
       registerWorkerDatabaseContext(
         requestId,
         env.HYPERDRIVE.connectionString,
-        { GEMINI_API_KEY: env.GEMINI_API_KEY, ADMIN_PASSWORD: env.ADMIN_PASSWORD },
+        { GEMINI_API_KEY: env.GEMINI_API_KEY, ADMIN_PASSWORD: env.ADMIN_PASSWORD, GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID },
       );
 
       const headers = new Headers(request.headers);
