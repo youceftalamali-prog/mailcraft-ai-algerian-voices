@@ -80,7 +80,10 @@ async function createAuthStoreSchema(): Promise<void> {
         UNIQUE(payment_method, transaction_reference)
       )
     `);
-    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_data BYTEA');\n    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_mime_type TEXT');\n    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_filename TEXT');\n    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS subscription_payment_requests_one_pending_per_user_idx ON subscription_payment_requests(user_id) WHERE status=\'pending\'');
+    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_data BYTEA');
+    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_mime_type TEXT');
+    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_filename TEXT');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS subscription_payment_requests_one_pending_per_user_idx ON subscription_payment_requests(user_id) WHERE status=\'pending\'');
     await client.query('CREATE INDEX IF NOT EXISTS subscription_payment_requests_status_created_idx ON subscription_payment_requests(status, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS subscription_payment_requests_user_idx ON subscription_payment_requests(user_id, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id)');
@@ -353,7 +356,8 @@ export async function createSubscriptionPaymentRequest(input: {
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING *
     `, [id,input.userId,input.plan,input.billingCycle,amount,input.paymentMethod,reference,
-      input.senderName?.trim().slice(0,120) || null,input.receiptNote?.trim().slice(0,1000) || null,\n      input.receiptData || null,input.receiptMimeType || null,input.receiptFilename?.trim().slice(0,180) || null]);
+      input.senderName?.trim().slice(0,120) || null,input.receiptNote?.trim().slice(0,1000) || null,
+      input.receiptData || null,input.receiptMimeType || null,input.receiptFilename?.trim().slice(0,180) || null]);
     const withEmail = await client.query(`
       SELECT p.*, u.email FROM subscription_payment_requests p
       JOIN app_users u ON u.id=p.user_id WHERE p.id=$1
