@@ -1321,6 +1321,23 @@ app.get('/api/admin/subscription-requests/:id/receipt', adminLimiter, requireAdm
   res.send(receipt.data);
 });
 
+app.get('/api/admin/subscription-summary', adminLimiter, requireAdmin, async (_req: Request, res: Response): Promise<void> => {
+  const result = await getDatabasePool().query(`
+    SELECT
+      (SELECT COUNT(*)::integer FROM app_users WHERE role='user') AS total_users,
+      (SELECT COUNT(*)::integer FROM subscription_payment_requests WHERE status='pending') AS pending_requests,
+      (SELECT COUNT(*)::integer FROM app_users WHERE role='user' AND plan <> 'free' AND subscription_expires_at > NOW()) AS active_subscribers,
+      (SELECT COALESCE(SUM(amount_dzd),0)::bigint FROM subscription_payment_requests WHERE status='approved') AS verified_revenue_dzd
+  `);
+  const row = result.rows[0];
+  res.json({
+    totalUsers: Number(row.total_users || 0),
+    pendingRequests: Number(row.pending_requests || 0),
+    activeSubscribers: Number(row.active_subscribers || 0),
+    verifiedRevenueDzd: Number(row.verified_revenue_dzd || 0),
+  });
+});
+
 app.get('/api/admin/subscription-requests', adminLimiter, requireAdmin, async (req: Request, res: Response): Promise<void> => {
   const status = req.query.status;
   if (status !== undefined && !['pending','approved','rejected'].includes(String(status))) {
