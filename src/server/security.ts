@@ -431,7 +431,7 @@ export async function reviewSubscriptionPaymentRequest(input: {
       const limits: Record<SubscriptionPlan, number> = { starter: 50, pro: 9999, business: 9999 };
       const userUpdate = await client.query(`
         UPDATE app_users SET plan=$2, monthly_generations_used=0,
-          monthly_generations_limit=$3,
+          monthly_generations_limit=$3, monthly_usage_resets_at=NOW() + INTERVAL '1 month',
           subscription_expires_at=GREATEST(COALESCE(subscription_expires_at,NOW()),NOW()) + ($4::integer * INTERVAL '1 month')
         WHERE id=$1 AND role='user'
       `, [payment.userId,payment.plan,limits[payment.plan],months]);
