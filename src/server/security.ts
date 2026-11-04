@@ -80,7 +80,7 @@ async function createAuthStoreSchema(): Promise<void> {
         UNIQUE(payment_method, transaction_reference)
       )
     `);
-    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS subscription_payment_requests_one_pending_per_user_idx ON subscription_payment_requests(user_id) WHERE status=\'pending\'');
+    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_data BYTEA');\n    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_mime_type TEXT');\n    await client.query('ALTER TABLE subscription_payment_requests ADD COLUMN IF NOT EXISTS receipt_filename TEXT');\n    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS subscription_payment_requests_one_pending_per_user_idx ON subscription_payment_requests(user_id) WHERE status=\'pending\'');
     await client.query('CREATE INDEX IF NOT EXISTS subscription_payment_requests_status_created_idx ON subscription_payment_requests(status, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS subscription_payment_requests_user_idx ON subscription_payment_requests(user_id, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id)');
@@ -312,7 +312,7 @@ export interface SubscriptionPaymentRequest {
   billingCycle: SubscriptionBillingCycle; amountDzd: number;
   paymentMethod: SubscriptionPaymentMethod; transactionReference: string;
   senderName: string | null; receiptNote: string | null; status: 'pending' | 'approved' | 'rejected';
-  reviewedAt: string | null; rejectionReason: string | null; createdAt: string;
+  reviewedAt: string | null; rejectionReason: string | null; receiptAvailable: boolean; createdAt: string;
 }
 
 const subscriptionFromRow = (r: any): SubscriptionPaymentRequest => ({
@@ -353,7 +353,7 @@ export async function createSubscriptionPaymentRequest(input: {
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING *
     `, [id,input.userId,input.plan,input.billingCycle,amount,input.paymentMethod,reference,
-      input.senderName?.trim().slice(0,120) || null,input.receiptNote?.trim().slice(0,1000) || null]);
+      input.senderName?.trim().slice(0,120) || null,input.receiptNote?.trim().slice(0,1000) || null,\n      input.receiptData || null,input.receiptMimeType || null,input.receiptFilename?.trim().slice(0,180) || null]);
     const withEmail = await client.query(`
       SELECT p.*, u.email FROM subscription_payment_requests p
       JOIN app_users u ON u.id=p.user_id WHERE p.id=$1
@@ -385,6 +385,21 @@ export async function getUserSubscriptionPaymentRequests(userId: string): Promis
     ORDER BY p.created_at DESC LIMIT 50
   `, [userId]);
   return result.rows.map(subscriptionFromRow);
+}
+
+
+export async function getSubscriptionPaymentReceipt(requestId: string): Promise<{ data: Buffer; mimeType: string; filename: string } | null> {
+  const result = await getDatabasePool().query(
+    'SELECT receipt_data, receipt_mime_type, receipt_filename FROM subscription_payment_requests WHERE id=$1',
+    [requestId],
+  );
+  const row = result.rows[0];
+  if (!row?.receipt_data || !row.receipt_mime_type) return null;
+  return {
+    data: Buffer.isBuffer(row.receipt_data) ? row.receipt_data : Buffer.from(row.receipt_data),
+    mimeType: row.receipt_mime_type,
+    filename: row.receipt_filename || 'payment-receipt',
+  };
 }
 
 export async function reviewSubscriptionPaymentRequest(input: {
