@@ -309,6 +309,7 @@ type GoogleIdTokenClaims = {
   sub?: string;
   email?: string;
   email_verified?: boolean;
+  azp?: string;
 };
 
 let googleJwksCache: { keys: JsonWebKey[]; expiresAt: number } | null = null;
@@ -328,7 +329,7 @@ async function getGoogleSigningKeys(): Promise<JsonWebKey[]> {
   const payload = await response.json() as { keys?: JsonWebKey[] };
   if (!Array.isArray(payload.keys) || payload.keys.length === 0) throw new Error('GOOGLE_SIGNING_KEYS_INVALID');
   const cacheControl = response.headers.get('cache-control') || '';
-  const maxAge = Number(cacheControl.match(/max-age=(\\d+)/i)?.[1] || 300);
+  const maxAge = Number(cacheControl.match(/max-age=(\d+)/i)?.[1] || 300);
   googleJwksCache = { keys: payload.keys, expiresAt: Date.now() + Math.min(Math.max(maxAge, 60), 3600) * 1000 };
   return payload.keys;
 }
@@ -348,6 +349,7 @@ async function verifyGoogleIdToken(idToken: string, clientId: string): Promise<G
     if (
       (claims.iss !== 'https://accounts.google.com' && claims.iss !== 'accounts.google.com') ||
       !audiences.includes(clientId) ||
+      (audiences.length > 1 && claims.azp !== clientId) ||
       typeof claims.exp !== 'number' || claims.exp <= now ||
       typeof claims.iat !== 'number' || claims.iat > now + 300 ||
       typeof claims.sub !== 'string' || claims.sub.length < 1 ||
@@ -396,7 +398,7 @@ app.post('/api/auth/google', authLimiter, async (req: Request, res: Response): P
   }
 
   const email = claims.email.trim().toLowerCase();
-  if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email === SECURITY_ADMIN_EMAIL.toLowerCase()) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email === SECURITY_ADMIN_EMAIL.toLowerCase()) {
     res.status(403).json({ error: 'GOOGLE_ACCOUNT_NOT_ALLOWED', message: 'حساب المالك يستخدم تسجيل الدخول الإداري المنفصل.' });
     return;
   }
