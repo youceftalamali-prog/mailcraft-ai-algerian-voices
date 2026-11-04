@@ -1249,6 +1249,14 @@ const subscriptionPaymentLimiter = rateLimiter({
 // The server derives the price from the selected plan and billing cycle.
 app.post('/api/subscriptions/requests', subscriptionPaymentLimiter, requireAuth, async (req: Request, res: Response): Promise<void> => {
   const { plan, billingCycle, paymentMethod, transactionReference, senderName, receiptNote } = req.body || {};
+  if (req.user?.role !== 'user') {
+    res.status(403).json({ error: 'CUSTOMER_ACCOUNT_REQUIRED', message: 'طلبات الاشتراك متاحة لحسابات العملاء فقط.' });
+    return;
+  }
+  if (typeof req.body.receiptDataUrl !== 'undefined' && typeof req.body.receiptDataUrl !== 'string') {
+    res.status(400).json({ error: 'INVALID_RECEIPT_FILE', message: 'ملف الإيصال غير صالح.' });
+    return;
+  }
   if (!['starter','pro','business'].includes(plan)
     || !['monthly','annual'].includes(billingCycle)
     || paymentMethod !== 'baridimob'
