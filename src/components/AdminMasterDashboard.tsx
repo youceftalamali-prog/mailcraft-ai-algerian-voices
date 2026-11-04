@@ -573,7 +573,7 @@ export const AdminMasterDashboard: React.FC<AdminMasterDashboardProps> = ({
         <div className="mt-6 pt-5 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
           <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
             <span className="text-slate-400 block text-[11px]">إجمالي المتاجر المشتركة</span>
-            <span className="text-lg font-black text-white font-mono mt-0.5 block">{totalSubscribers} متاجر</span>
+            <span className="text-lg font-black text-white font-mono mt-0.5 block">{totalSubscribers} مستخدمين</span>
           </div>
           <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
             <span className="text-amber-400 block text-[11px] font-bold">بانتظار التأكيد (بريدي موب)</span>
