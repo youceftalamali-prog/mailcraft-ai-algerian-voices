@@ -419,6 +419,12 @@ export async function reviewSubscriptionPaymentRequest(input: {
   const client = await getDatabasePool().connect();
   try {
     await client.query('BEGIN');
+    const owner = await client.query(
+      'SELECT user_id FROM subscription_payment_requests WHERE id=$1',
+      [input.requestId],
+    );
+    if (!owner.rows[0]) throw new Error('PAYMENT_REQUEST_NOT_FOUND');
+    await client.query('SELECT id FROM app_users WHERE id=$1 FOR UPDATE', [owner.rows[0].user_id]);
     const found = await client.query(`
       SELECT p.*, u.email FROM subscription_payment_requests p
       JOIN app_users u ON u.id=p.user_id WHERE p.id=$1 FOR UPDATE OF p
