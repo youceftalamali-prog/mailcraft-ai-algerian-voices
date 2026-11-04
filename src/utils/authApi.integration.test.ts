@@ -114,6 +114,15 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     const expiredSessionResponse = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: loginCookie } });
     assert.deepEqual(await expiredSessionResponse.json(), { authenticated: false },
       'expired sessions must not authenticate requests');
+    const paymentLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'login', email: userEmail, password: userPassword }),
+    });
+    assert.equal(paymentLoginResponse.status, 200);
+    const paymentCookie = (paymentLoginResponse.headers.get('set-cookie') || '').match(/dz_session=[a-f0-9]{64}/)?.[0];
+    assert.ok(paymentCookie, 'customer must have an active session to submit a payment request');
+
 
     // Simulate a legacy owner row with a downgraded role in the disposable DB.
     const owner = await registerOrGetUser(ADMIN_EMAIL, 'admin');
@@ -154,7 +163,7 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     assert.equal(adminRouteResponse.status, 200, 'verified owner must access admin endpoints');
     const paymentRequestResponse = await fetch(`${baseUrl}/api/subscriptions/requests`, {
       method: 'POST',
-      headers: { cookie: loginCookie, 'content-type': 'application/json' },
+      headers: { cookie: paymentCookie, 'content-type': 'application/json' },
       body: JSON.stringify({
         plan: 'starter', billingCycle: 'monthly', paymentMethod: 'baridimob',
         transactionReference: `CI-TRANSFER-${Date.now()}`, amountDzd: 1,
@@ -170,7 +179,7 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
 
     const secondPendingRequest = await fetch(`${baseUrl}/api/subscriptions/requests`, {
       method: 'POST',
-      headers: { cookie: loginCookie, 'content-type': 'application/json' },
+      headers: { cookie: paymentCookie, 'content-type': 'application/json' },
       body: JSON.stringify({
         plan: 'pro', billingCycle: 'annual', paymentMethod: 'edahabia',
         transactionReference: `CI-SECOND-${Date.now()}`,
@@ -179,7 +188,7 @@ test('HTTP authentication flow: signup, session persistence, logout, and owner-o
     assert.equal(secondPendingRequest.status, 409, 'a user cannot open multiple pending payment requests');
 
     const customerRequestsResponse = await fetch(`${baseUrl}/api/subscriptions/requests`, {
-      headers: { cookie: loginCookie },
+      headers: { cookie: paymentCookie },
     });
     assert.equal(customerRequestsResponse.status, 200);
     const customerRequests = await customerRequestsResponse.json() as { requests: Array<{ id: string }> };
